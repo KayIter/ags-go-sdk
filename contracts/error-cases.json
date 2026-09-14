@@ -1,0 +1,9 @@
+[
+  {"status":200,"cloud_code":"InvalidParameterValue.Timeout","code":"INVALID_ARGUMENT","retryable":false},
+  {"status":200,"cloud_code":"AuthFailure.SignatureFailure","code":"UNAUTHENTICATED","retryable":false},
+  {"status":200,"cloud_code":"UnauthorizedOperation","code":"PERMISSION_DENIED","retryable":false},
+  {"status":200,"cloud_code":"ResourceNotFound","code":"NOT_FOUND","retryable":false},
+  {"status":200,"cloud_code":"ResourceUnavailable.IncorrectState","code":"CONFLICT","retryable":false},
+  {"status":200,"cloud_code":"RequestLimitExceeded","code":"RESOURCE_EXHAUSTED","retryable":true},
+  {"status":503,"cloud_code":"InternalError","code":"UNAVAILABLE","retryable":true}
+]

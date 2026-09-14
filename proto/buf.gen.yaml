@@ -1,10 +1,10 @@
 version: v1
 plugins:
-  - plugin: buf.build/protocolbuffers/go
+  - plugin: go
     out: ..
     opt:
       - module=github.com/TencentCloudAgentRuntime/ags-go-sdk
-  - plugin: buf.build/connectrpc/go
+  - plugin: connect-go
     out: ..
     opt:
       - module=github.com/TencentCloudAgentRuntime/ags-go-sdk

@@ -1,0 +1,67 @@
+{
+  "kind": "synthetic-update-contract",
+  "cases": [
+    {
+      "id": "timeout",
+      "timeoutSeconds": 300,
+      "metadata": {},
+      "expectedCode": "",
+      "cloudCalls": 1
+    },
+    {
+      "id": "metadata",
+      "metadata": {
+        "owner": "new"
+      },
+      "expectedCode": "",
+      "cloudCalls": 2
+    },
+    {
+      "id": "combined",
+      "timeoutSeconds": 300,
+      "metadata": {
+        "owner": "new",
+        "empty": ""
+      },
+      "expectedCode": "",
+      "cloudCalls": 2
+    },
+    {
+      "id": "empty",
+      "metadata": {},
+      "expectedCode": "INVALID_ARGUMENT",
+      "cloudCalls": 0
+    },
+    {
+      "id": "too-short",
+      "timeoutSeconds": 29,
+      "metadata": {},
+      "expectedCode": "INVALID_ARGUMENT",
+      "cloudCalls": 0
+    },
+    {
+      "id": "fractional",
+      "timeoutSeconds": 60.5,
+      "metadata": {},
+      "expectedCode": "INVALID_ARGUMENT",
+      "cloudCalls": 0
+    },
+    {
+      "id": "reserved",
+      "timeoutSeconds": 300,
+      "metadata": {
+        "x-private": "no"
+      },
+      "expectedCode": "UNSUPPORTED",
+      "cloudCalls": 0
+    },
+    {
+      "id": "empty-key",
+      "metadata": {
+        "": "no"
+      },
+      "expectedCode": "INVALID_ARGUMENT",
+      "cloudCalls": 0
+    }
+  ]
+}

@@ -1,5 +1,9 @@
 syntax = "proto3";
 
+// Modified by Tencent in 2026 to add the ags-go-sdk Go package mapping and this
+// notice. Derived from e2b-dev/infra revision
+// 97d10b529fd506f2ea3ac6a262a8b453fd8cbb14 under Apache-2.0.
+
 package filesystem;
 
 option go_package = "github.com/TencentCloudAgentRuntime/ags-go-sdk/pb/filesystem";

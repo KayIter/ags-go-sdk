@@ -1,52 +1,60 @@
-# Makefile for generating Go code from proto files using buf and ConnectRPC
+BUF ?= buf
+GO ?= go
+GITLEAKS ?= $(shell $(GO) env GOPATH)/bin/gitleaks
 
-# Tools
-BUF := buf
-GO := go
+BUF_VERSION := v1.47.2
+PROTOC_GEN_GO_VERSION := v1.36.11
+PROTOC_GEN_CONNECT_GO_VERSION := v1.18.1
+GITLEAKS_VERSION := v8.30.0
 
-.PHONY: all gen tools clean test test-unit test-integration test-internal
+.PHONY: all tools generate gen test test-race vet fmt-check verify-contracts verify-docs verify-api verify-generate verify-consumers verify-e2e-compile verify-secrets verify test-e2e
 
-all: gen
+all: verify
 
-# Install required tools
 tools:
-	$(GO) install github.com/bufbuild/buf/cmd/buf@latest
+	$(GO) install github.com/bufbuild/buf/cmd/buf@$(BUF_VERSION)
+	$(GO) install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION)
+	$(GO) install connectrpc.com/connect/cmd/protoc-gen-connect-go@$(PROTOC_GEN_CONNECT_GO_VERSION)
+	$(GO) install github.com/zricethezav/gitleaks/v8@$(GITLEAKS_VERSION)
 
+generate gen:
+	cd proto && PATH="$$($(GO) env GOPATH)/bin:$$PATH" $(BUF) generate
 
-# Generate all proto files using buf
-gen:
-	cd proto && $(BUF) generate
-
-# Generate code from filesystem proto
-gen-filesystem:
-	cd proto && $(BUF) generate --path tool/filesystem
-
-# Generate code from process proto  
-gen-process:
-	cd proto && $(BUF) generate --path tool/process
-
-# Remove generated files
-clean:
-	rm -rf pb/
-
-clean-filesystem:
-	rm -f pb/filesystem/filesystem.pb.go
-	rm -rf pb/filesystem/filesystemconnect
-
-clean-process:
-	rm -f pb/process/process.pb.go
-	rm -rf pb/process/processconnect
-
-# Test commands
 test:
-	$(GO) test ./...
+	GOTOOLCHAIN=local $(GO) test ./...
 
-test-unit:
-	$(GO) test -short ./...
+test-race:
+	GOTOOLCHAIN=local $(GO) test -race ./...
 
-test-integration:
-	$(GO) test ./test/...
+vet:
+	GOTOOLCHAIN=local $(GO) vet ./...
 
-# Run internal tests (requires internal network access)
-test-internal:
-	$(GO) test -tags=internal ./test/...
+fmt-check:
+	@files="$$(gofmt -l $$(find . -name '*.go' -not -path './.git/*'))"; test -z "$$files" || { echo "gofmt required:"; echo "$$files"; exit 1; }
+
+verify-contracts:
+	GOTOOLCHAIN=local $(GO) test . -run 'Test(ControlPlaneActionRegistry|MetricsRegistry|ErrorCodes|ProtoHashes)MatchesContract'
+
+verify-docs:
+	GOTOOLCHAIN=local $(GO) run ./internal/cmd/verifyrepo
+
+verify-api:
+	GO="$(GO)" bash scripts/verify-api.sh
+
+verify-generate:
+	GO="$(GO)" bash scripts/verify-generate.sh
+
+verify-consumers:
+	GO="$(GO)" bash scripts/verify-consumers.sh
+
+verify-e2e-compile:
+	cd test && GOTOOLCHAIN=local $(GO) test -run '^$$' ./...
+
+verify-secrets:
+	$(GITLEAKS) detect --source=. --redact --no-banner
+	$(GITLEAKS) dir --redact --no-banner .
+
+verify: fmt-check test vet test-race verify-contracts verify-docs verify-api verify-generate verify-consumers verify-e2e-compile verify-secrets
+
+test-e2e:
+	GO="$(GO)" bash scripts/test-e2e.sh

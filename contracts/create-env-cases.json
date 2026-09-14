@@ -1,0 +1,14 @@
+{
+  "scope":"Public validation and control-plane request serialization. Runtime inheritance and recovery persistence are outside this fixture.",
+  "cases":[
+    {"id":"omitted","env":null,"valid":true,"publicCode":"NOT_FOUND","calls":1,"wire":null},
+    {"id":"empty","env":{},"valid":true,"publicCode":"NOT_FOUND","calls":1,"wire":null},
+    {"id":"portable-and-empty-value","env":{"Z_2":"fixture-sensitive-value","A":""},"valid":true,"publicCode":"NOT_FOUND","calls":1,"wire":[{"Name":"A","Value":""},{"Name":"Z_2","Value":"fixture-sensitive-value"}]},
+    {"id":"multiline-value","env":{"KEY":"line1\nline2"},"valid":true,"publicCode":"NOT_FOUND","calls":1,"wire":[{"Name":"KEY","Value":"line1\nline2"}]},
+    {"id":"empty-key","env":{"":"fixture-sensitive-value"},"valid":false,"publicCode":"INVALID_ARGUMENT","calls":0},
+    {"id":"numeric-prefix","env":{"1KEY":"value"},"valid":false,"publicCode":"INVALID_ARGUMENT","calls":0},
+    {"id":"punctuation-key","env":{"BAD-KEY":"value"},"valid":false,"publicCode":"INVALID_ARGUMENT","calls":0},
+    {"id":"non-ascii-key","env":{"变量":"value"},"valid":false,"publicCode":"INVALID_ARGUMENT","calls":0},
+    {"id":"nul-value","env":{"KEY":"bad\u0000value"},"valid":false,"publicCode":"INVALID_ARGUMENT","calls":0}
+  ]
+}

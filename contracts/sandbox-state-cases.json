@@ -1,0 +1,9 @@
+{
+  "cases": [
+    {"wire":"RUNNING","state":"RUNNING","terminal_failure":false},
+    {"wire":"FAILED","state":"FAILED","terminal_failure":true},
+    {"wire":"STOP_FAILED","state":"FAILED","terminal_failure":true},
+    {"wire":"PAUSE_FAILED","state":"FAILED","terminal_failure":true},
+    {"wire":"FUTURE_STATE","state":"UNKNOWN","terminal_failure":false}
+  ]
+}

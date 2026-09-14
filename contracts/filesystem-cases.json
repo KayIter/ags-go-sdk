@@ -1,0 +1,151 @@
+{
+  "scope": "Synthetic wire behavior; runtime-specific filesystem semantics are outside this fixture.",
+  "cases": [
+    {
+      "id": "stat-success",
+      "operation": "Stat",
+      "request": {
+        "path": "/fixture/item"
+      },
+      "status": 200,
+      "response": {
+        "entry": {
+          "name": "item",
+          "path": "/fixture/item",
+          "size": "7",
+          "type": "FILE_TYPE_FILE"
+        }
+      },
+      "expectedCode": "",
+      "user": "USER"
+    },
+    {
+      "id": "makedir-success",
+      "operation": "MakeDir",
+      "request": {
+        "path": "/fixture/new"
+      },
+      "status": 200,
+      "response": {
+        "entry": {
+          "name": "new",
+          "path": "/fixture/new",
+          "type": "FILE_TYPE_DIRECTORY"
+        }
+      },
+      "expectedCode": "",
+      "user": "USER"
+    },
+    {
+      "id": "move-success",
+      "operation": "Move",
+      "request": {
+        "source": "/fixture/item",
+        "destination": "/fixture/moved"
+      },
+      "status": 200,
+      "response": {
+        "entry": {
+          "name": "moved",
+          "path": "/fixture/moved",
+          "size": "7",
+          "type": "FILE_TYPE_FILE"
+        }
+      },
+      "expectedCode": "",
+      "user": "ROOT"
+    },
+    {
+      "id": "remove-success",
+      "operation": "Remove",
+      "request": {
+        "path": "/fixture/item"
+      },
+      "status": 200,
+      "response": {},
+      "expectedCode": "",
+      "user": "USER"
+    },
+    {
+      "id": "already_exists",
+      "operation": "Stat",
+      "request": {
+        "path": "/fixture/item"
+      },
+      "status": 409,
+      "response": {
+        "code": "already_exists",
+        "message": "private response must not leak"
+      },
+      "expectedCode": "CONFLICT",
+      "user": "USER"
+    },
+    {
+      "id": "not_found",
+      "operation": "Stat",
+      "request": {
+        "path": "/fixture/item"
+      },
+      "status": 404,
+      "response": {
+        "code": "not_found",
+        "message": "private response must not leak"
+      },
+      "expectedCode": "NOT_FOUND",
+      "user": "USER"
+    },
+    {
+      "id": "permission_denied",
+      "operation": "Stat",
+      "request": {
+        "path": "/fixture/item"
+      },
+      "status": 403,
+      "response": {
+        "code": "permission_denied",
+        "message": "private response must not leak"
+      },
+      "expectedCode": "PERMISSION_DENIED",
+      "user": "USER"
+    },
+    {
+      "id": "unimplemented",
+      "operation": "Stat",
+      "request": {
+        "path": "/fixture/item"
+      },
+      "status": 501,
+      "response": {
+        "code": "unimplemented",
+        "message": "private response must not leak"
+      },
+      "expectedCode": "PROTOCOL",
+      "user": "USER"
+    },
+    {
+      "id": "unavailable",
+      "operation": "Stat",
+      "request": {
+        "path": "/fixture/item"
+      },
+      "status": 503,
+      "response": {
+        "code": "unavailable",
+        "message": "private response must not leak"
+      },
+      "expectedCode": "UNAVAILABLE",
+      "user": "USER"
+    },
+    {
+      "id": "entry-missing",
+      "operation": "Stat",
+      "request": {
+        "path": "/fixture/item"
+      },
+      "status": 200,
+      "response": {},
+      "expectedCode": "PROTOCOL",
+      "user": "USER"
+    }
+  ]
+}

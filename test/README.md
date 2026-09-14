@@ -1,75 +1,32 @@
-# Testing Guide
+# Real Cloud E2E
 
-This directory contains integration tests for the Agent Sandbox Go SDK.
+This nested module is an explicit, serial test boundary. Root `go test ./...` does not enter it
+and never accesses Cloud services.
 
-## Test Categories
-
-### 1. Public Integration Tests
-These tests run against the public API endpoints and can be executed in any environment.
-
-**Files:**
-- `code_integration_test.go`
-- `command_integration_test.go`
-- `filesystem_integration_test.go`
-- `domain_integration_test.go`
-
-**Run command:**
-```bash
-go test ./test/...
-# or
-make test-integration
-```
-
-### 2. Internal Network Tests
-These tests require access to internal network endpoints and are only available in internal environments.
-
-**Files:**
-- `domain_internal_test.go` (requires `internal` build tag)
-
-**Run command:**
-```bash
-go test -tags=internal ./test/...
-# or
-make test-internal
-```
-
-## Environment Setup
-
-### Prerequisites
-1. Set up cloud credentials (required for all integration tests)
-2. For internal tests: Ensure access to internal network endpoints
-
-### Environment Variables
-The tests require proper cloud credentials to be configured. Check `helper_test.go` for the specific environment variables needed.
-
-## Build Tags
-
-We use Go build tags to control which tests are compiled and executed:
-
-- **No tags**: Public integration tests only
-- **`internal` tag**: Includes internal network tests
-
-### Examples
+Set all variables before running:
 
 ```bash
-# Run only public tests
-go test ./test/...
-
-# Run all tests including internal ones
-go test -tags=internal ./test/...
-
-# Run tests with verbose output
-go test -v -tags=internal ./test/...
-
-# Run specific test
-go test -tags=internal -run TestCreate_WithInternalDomain ./test/...
+export AGS_E2E=1
+export TENCENTCLOUD_SECRET_ID=...
+export TENCENTCLOUD_SECRET_KEY=...
+export AGS_E2E_REGION=ap-guangzhou
+export AGS_E2E_TOOL_ID=...       # custom envd-capable Tool used for Files, Commands, PTY, and Metrics
+export AGS_E2E_CODE_TOOL_ID=...  # code-interpreter Tool used for Code and context lifecycle
+make test-e2e
 ```
 
-## Makefile Commands
+`TENCENTCLOUD_TOKEN` is optional for temporary Cloud credentials. The tests never accept an API
+key or a Sandbox instance token.
 
-```bash
-make test              # Run all tests (unit + integration)
-make test-unit         # Run unit tests only (short tests)
-make test-integration  # Run public integration tests
-make test-internal     # Run internal network tests
-```
+The suite is serial (`-p=1`), creates at most four sandboxes, and registers independent cleanup
+for each accepted creation. Cleanup sends Delete and polls until the control plane reports
+`STOPPED` or `NOT_FOUND`. A failed cleanup fails the test. Do not run it against a shared Tool
+unless you are authorized to create and delete test instances.
+
+The explicit-client journey covers Files, streamed upload/read, Watch, Commands Run/List/Connect,
+PTY, all ten Metrics with an explicit Start/End window, Update, and Connect. A dedicated
+code-interpreter journey covers Code, managed/external contexts, Pause/Resume, and generation
+invalidation. Keeping the Tool IDs separate avoids claiming that an arbitrary custom image
+provides the Code service on port 49999. A separate default-shortcut journey proves the
+environment-backed entrance. The 30-second creation boundary has its own resource and cleanup
+path.

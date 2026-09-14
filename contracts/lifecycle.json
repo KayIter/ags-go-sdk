@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "states": ["CREATING", "RUNNING", "PAUSING", "PAUSED", "RESUMING", "STOPPING", "STOPPED", "FAILED", "UNKNOWN"],
+  "timeouts": {
+    "create_seconds": {"minimum": 30, "maximum": 86400, "whole_seconds": true},
+    "resume_seconds": {"minimum": 30, "maximum": 86400, "whole_seconds": true},
+    "update_seconds": {"minimum": 300, "maximum": 86400, "whole_seconds": true},
+    "connect_running_seconds": {"minimum": 300, "maximum": 86400, "whole_seconds": true},
+    "connect_paused_seconds": {"minimum": 30, "maximum": 86400, "whole_seconds": true}
+  },
+  "rules": {
+    "close_is_local_only": true,
+    "delete_not_found_is_success": true,
+    "mutation_auto_retry": false,
+    "pause_invalidates_generation_before_request": true,
+    "resume_creates_new_generation": true
+  }
+}

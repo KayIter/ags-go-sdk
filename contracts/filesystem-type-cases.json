@@ -1,0 +1,9 @@
+{
+  "cases": [
+    {"id":"omitted", "entry":{"path":"/fixture/link"}, "expected":"UNKNOWN"},
+    {"id":"zero", "entry":{"path":"/fixture/link","type":0}, "expected":"UNKNOWN"},
+    {"id":"future", "entry":{"path":"/fixture/link","type":42}, "expected":"UNKNOWN"},
+    {"id":"file", "entry":{"path":"/fixture/link","type":"FILE_TYPE_FILE"}, "expected":"FILE"},
+    {"id":"directory", "entry":{"path":"/fixture/link","type":"FILE_TYPE_DIRECTORY"}, "expected":"DIRECTORY"}
+  ]
+}

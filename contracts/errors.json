@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "codes": ["INVALID_ARGUMENT", "UNAUTHENTICATED", "PERMISSION_DENIED", "NOT_FOUND", "CONFLICT", "RESOURCE_EXHAUSTED", "DEADLINE_EXCEEDED", "CANCELED", "UNAVAILABLE", "INSTANCE_NOT_READY", "INSTANCE_PAUSED", "PROTOCOL", "INTERNAL", "UNSUPPORTED"],
+  "fields": ["code", "reason", "operation", "request_id", "retryable", "cause", "instance_id", "mutation"],
+  "mutation_states": ["NOT_SENT", "UNKNOWN"],
+  "mutation_phases": ["VALIDATION", "READ_METADATA", "SUBMIT"],
+  "rules": {
+    "format_excludes": ["cause", "instance_id", "credentials", "authorization_headers", "response_body"],
+    "unknown_mutation_outcome_is_retry_permission": false
+  }
+}

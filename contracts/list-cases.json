@@ -1,0 +1,24 @@
+{
+  "scope": "Shared actual-adapter loopback tests, not real-cloud or full journey 12 acceptance. OR and RESUMING remain temporarily unavailable.",
+  "cases": [
+    {"id":"default","states":[],"metadata":{},"filters":[],"total":0,"items":0,"next":null},
+    {"id":"creating","states":["CREATING"],"metadata":{},"filters":[{"Name":"Status","Values":["STARTING"]}],"total":0,"items":0,"next":null},
+    {"id":"all-supported-states","states":["CREATING","RUNNING","PAUSING","PAUSED","STOPPING","STOPPED","FAILED"],"metadata":{},"filters":[{"Name":"Status","Values":["STARTING","RUNNING","PAUSING","PAUSED","STOPPING","STOPPED","FAILED"]}],"total":0,"items":0,"next":null},
+    {"id":"metadata-only-empty-value","states":[],"metadata":{"session":[""]},"filters":[{"Name":"metadata:session","Values":[""]}],"total":0,"items":0,"next":null},
+    {"id":"case-and-whitespace-value-preserved","states":[],"metadata":{"Session":[" marker "]},"filters":[{"Name":"metadata:Session","Values":[" marker "]}],"total":0,"items":0,"next":null},
+    {"id":"and-first-page","states":["RUNNING"],"metadata":{"session":["fixture"],"project":["test"]},"filters":[{"Name":"Status","Values":["RUNNING"]},{"Name":"metadata:project","Values":["test"]},{"Name":"metadata:session","Values":["fixture"]}],"offset":0,"limit":1,"total":3,"items":1,"next":1},
+    {"id":"and-last-page","states":["RUNNING"],"metadata":{"session":["fixture"]},"filters":[{"Name":"Status","Values":["RUNNING"]},{"Name":"metadata:session","Values":["fixture"]}],"offset":2,"limit":1,"total":3,"items":1,"next":null},
+    {"id":"empty-page-preserves-count","states":[],"metadata":{"session":["fixture"]},"filters":[{"Name":"metadata:session","Values":["fixture"]}],"offset":5,"limit":1,"total":3,"items":0,"next":null},
+    {"id":"stopped-with-metadata-success","states":["STOPPED"],"metadata":{"session":["fixture"]},"filters":[{"Name":"Status","Values":["STOPPED"]},{"Name":"metadata:session","Values":["fixture"]}],"total":1,"items":1,"next":null,"returnedState":"STOPPED"},
+    {"id":"stopped-with-metadata-server-error","states":["STOPPED"],"metadata":{"session":["fixture"]},"filters":[{"Name":"Status","Values":["STOPPED"]},{"Name":"metadata:session","Values":["fixture"]}],"serverError":"InvalidParameter","code":"INVALID_ARGUMENT","reason":"CLOUD_INVALID_ARGUMENT"},
+    {"id":"multi-value-or-unavailable","states":["RUNNING"],"metadata":{"session":["a","b"]},"code":"UNSUPPORTED","reason":"LIST_METADATA_OR_UNAVAILABLE"},
+    {"id":"resuming-unavailable","states":["RESUMING"],"metadata":{},"code":"UNSUPPORTED","reason":"LIST_STATE_UNAVAILABLE"},
+    {"id":"unknown-invalid","states":["UNKNOWN"],"metadata":{},"code":"INVALID_ARGUMENT","reason":"LIST_STATE_INVALID"},
+    {"id":"empty-key","states":[],"metadata":{"":["value"]},"code":"INVALID_ARGUMENT","reason":"LIST_METADATA_INVALID"},
+    {"id":"trimmed-key-rejected","states":[],"metadata":{" session":["value"]},"code":"INVALID_ARGUMENT","reason":"LIST_METADATA_INVALID"},
+    {"id":"empty-values","states":[],"metadata":{"session":[]},"code":"INVALID_ARGUMENT","reason":"LIST_METADATA_INVALID"},
+    {"id":"null-values","states":[],"metadata":{"session":null},"code":"INVALID_ARGUMENT","reason":"LIST_METADATA_INVALID"},
+    {"id":"too-many-keys","states":[],"metadata":{"a":[""],"b":[""],"c":[""],"d":[""],"e":[""],"f":[""]},"code":"INVALID_ARGUMENT","reason":"LIST_METADATA_INVALID"},
+    {"id":"negative-offset","states":[],"metadata":{},"offset":-1,"code":"INVALID_ARGUMENT","reason":"PAGINATION_OUT_OF_RANGE"}
+  ]
+}

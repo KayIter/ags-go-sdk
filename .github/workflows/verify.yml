@@ -1,0 +1,36 @@
+name: Verify
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  go122:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up tool-builder Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.25.4
+          cache: false
+      - name: Install pinned verification tools
+        run: make tools
+      - name: Set up minimum supported Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.22.12
+          cache-dependency-path: |
+            go.sum
+            test/go.sum
+      - name: Verify with the minimum Go version
+        env:
+          GOTOOLCHAIN: local
+        run: make verify

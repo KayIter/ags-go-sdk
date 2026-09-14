@@ -1,112 +1,86 @@
-package test_test
+package e2e_test
 
 import (
 	"context"
+	"errors"
 	"os"
-	"strconv"
 	"testing"
 	"time"
 
-	"github.com/TencentCloudAgentRuntime/ags-go-sdk/sandbox/code"
-	ags "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ags/v20250920"
-	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
-	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/profile"
+	ags "github.com/TencentCloudAgentRuntime/ags-go-sdk"
 )
 
-// newAgsClient creates an AGS client from environment credentials.
-// Returns nil if credentials are missing.
-func newAgsClient(t *testing.T) *ags.Client {
+type cloudEnvironment struct {
+	region     string
+	toolID     string
+	codeToolID string
+}
+
+func requireCloudEnvironment(t *testing.T) cloudEnvironment {
 	t.Helper()
-
-	secretID := os.Getenv("TENCENTCLOUD_SECRET_ID")
-	secretKey := os.Getenv("TENCENTCLOUD_SECRET_KEY")
-	if secretID == "" || secretKey == "" {
-		return nil
+	if os.Getenv("AGS_E2E") != "1" {
+		t.Fatal("real Cloud E2E requires AGS_E2E=1; use make test-e2e")
 	}
-
-	cred := &common.Credential{
-		SecretId:  secretID,
-		SecretKey: secretKey,
+	required := []string{"TENCENTCLOUD_SECRET_ID", "TENCENTCLOUD_SECRET_KEY", "AGS_E2E_REGION", "AGS_E2E_TOOL_ID", "AGS_E2E_CODE_TOOL_ID"}
+	for _, name := range required {
+		if os.Getenv(name) == "" {
+			t.Fatalf("real Cloud E2E requires %s", name)
+		}
 	}
-	clientProfile := profile.NewClientProfile()
-	clientProfile.HttpProfile.Endpoint = "ags.tencentcloudapi.com"
+	return cloudEnvironment{region: os.Getenv("AGS_E2E_REGION"), toolID: os.Getenv("AGS_E2E_TOOL_ID"), codeToolID: os.Getenv("AGS_E2E_CODE_TOOL_ID")}
+}
 
-	client, err := ags.NewClient(cred, "ap-guangzhou", clientProfile)
+func newCloudClient(t *testing.T, environment cloudEnvironment) *ags.Client {
+	t.Helper()
+	client, err := ags.NewClient(ags.WithRegion(environment.region))
 	if err != nil {
-		t.Fatalf("create ags client: %v", err)
+		t.Fatal(err)
 	}
 	return client
 }
 
-// newSandbox creates a sandbox using Create, skips if credentials are missing.
-func newSandbox(t *testing.T) *code.Sandbox {
+func deleteAndConfirm(t *testing.T, manager *ags.SandboxManager, sandbox *ags.Sandbox) {
 	t.Helper()
-
-	client := newAgsClient(t)
-	if client == nil {
-		t.Skip("missing cloud credentials, skip integration tests")
-	}
-
-	sb, err := code.Create(context.TODO(), "code-interpreter-v1", code.WithClient(client), code.WithSandboxTimeout(300*time.Second))
-	if err != nil {
-		t.Fatalf("create sandbox: %v", err)
-	}
-
-	t.Cleanup(func() {
-		_ = sb.Kill(context.TODO())
-	})
-	return sb
+	_ = sandbox.Close()
+	deleteIDAndConfirm(t, manager, sandbox.ID())
 }
 
-// newSandboxWithConnect creates a sandbox using Create, then reconnects using Connect.
-// This tests the Connect flow with a valid sandbox ID.
-func newSandboxWithConnect(t *testing.T) *code.Sandbox {
+func cleanupAcceptedCreate(t *testing.T, manager *ags.SandboxManager, err error) {
 	t.Helper()
-
-	client := newAgsClient(t)
-	if client == nil {
-		t.Skip("missing cloud credentials, skip integration tests")
+	var failure *ags.Error
+	if errors.As(err, &failure) && failure.InstanceID != "" {
+		deleteIDAndConfirm(t, manager, failure.InstanceID)
 	}
-
-	// First create a sandbox to get a valid sandbox ID
-	sb, err := code.Create(context.TODO(), "code-interpreter-v1", code.WithClient(client), code.WithSandboxTimeout(300*time.Second))
-	if err != nil {
-		t.Fatalf("create sandbox: %v", err)
-	}
-
-	sandboxId := sb.SandboxId
-
-	// Now connect to the same sandbox using Connect
-	sbConnected, err := code.Connect(context.TODO(), sandboxId, code.WithClient(client))
-	if err != nil {
-		// Cleanup the created sandbox on error
-		_ = sb.Kill(context.TODO())
-		t.Fatalf("connect to sandbox: %v", err)
-	}
-
-	t.Cleanup(func() {
-		_ = sbConnected.Kill(context.TODO())
-	})
-	return sbConnected
 }
 
-// fmtInt64 formats int64 to string without importing fmt.
-func fmtInt64(v int64) string {
-	return strconv.FormatInt(v, 10)
-}
-
-// runWithBothModes runs the test function with both Create and Connect modes.
-// Each mode runs as a subtest.
-func runWithBothModes(t *testing.T, testFn func(t *testing.T, sb *code.Sandbox)) {
+func deleteIDAndConfirm(t *testing.T, manager *ags.SandboxManager, id string) {
 	t.Helper()
-
-	t.Run("Create", func(t *testing.T) {
-		sb := newSandbox(t)
-		testFn(t, sb)
-	})
-
-	t.Run("Connect", func(t *testing.T) {
-		sb := newSandboxWithConnect(t)
-		testFn(t, sb)
-	})
+	cleanup, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	if err := manager.Delete(cleanup, id); err != nil {
+		t.Errorf("delete sandbox: %v", err)
+		return
+	}
+	deadline := time.NewTicker(2 * time.Second)
+	defer deadline.Stop()
+	for {
+		info, err := manager.Get(cleanup, id)
+		if err != nil {
+			var failure *ags.Error
+			if errors.As(err, &failure) && failure.Code == ags.NotFound {
+				return
+			}
+			t.Errorf("confirm sandbox cleanup: %v", err)
+			return
+		}
+		if info.State == ags.Stopped {
+			return
+		}
+		select {
+		case <-cleanup.Done():
+			t.Errorf("confirm sandbox cleanup: %v", cleanup.Err())
+			return
+		case <-deadline.C:
+		}
+	}
 }

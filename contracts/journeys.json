@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "journeys": [
+    {"id": "default-create-command-delete", "entry": "sandbox.Create", "capabilities": ["create", "commands", "delete"]},
+    {"id": "explicit-client-lifecycle", "entry": "Client.Sandboxes", "capabilities": ["create", "connect", "get", "list", "pause", "resume", "update", "delete"]},
+    {"id": "files-stream-watch", "entry": "Sandbox.Files", "capabilities": ["read", "streaming_write", "stat", "exists", "list", "mkdir", "move", "remove", "watch"]},
+    {"id": "code-context", "entry": "Sandbox.Code", "capabilities": ["create_context", "managed_context", "external_context", "bounded_callbacks"]},
+    {"id": "metrics-window", "entry": "Sandbox.Metrics", "capabilities": ["ten_metrics", "start", "end", "partial_success"]},
+    {"id": "multiple-cloud-identities", "entry": "ags.NewClient", "capabilities": ["credential_isolation", "transport_isolation"]}
+  ]
+}

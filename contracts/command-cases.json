@@ -1,0 +1,15 @@
+{
+  "evidence": "Synthetic Connect frames through actual adapters; not real-runtime acceptance.",
+  "cases": [
+    {"id":"completed-nonzero", "limit":0, "frames":[{"event":{"start":{"pid":42}}},{"event":{"data":{"stdout":"MDEyMzQ1"}}},{"event":{"data":{"stderr":"ZXJy"}}},{"event":{"end":{"exitCode":7,"exited":true,"status":"exit"}}}], "stage":"wait", "code":"", "stdout":"012345", "stderr":"err", "exitCode":7, "stdoutTruncated":false, "stderrTruncated":false},
+    {"id":"bounded-output", "limit":3, "frames":[{"event":{"start":{"pid":42}}},{"event":{"data":{"stdout":"MDEyMzQ1"}}},{"event":{"data":{"stderr":"ZXJyIQ=="}}},{"event":{"end":{"exitCode":0,"exited":true}}}], "stage":"wait", "code":"", "stdout":"012", "stderr":"err", "exitCode":0, "stdoutTruncated":true, "stderrTruncated":true},
+    {"id":"keepalive-before-start", "limit":0, "frames":[{"event":{"keepalive":{}}},{"event":{"start":{"pid":42}}},{"event":{"keepalive":{}}},{"event":{"end":{"exitCode":0,"exited":true}}}], "stage":"wait", "code":"", "stdout":"", "stderr":"", "exitCode":0, "stdoutTruncated":false, "stderrTruncated":false},
+    {"id":"missing-start", "limit":0, "frames":[], "stage":"start", "code":"PROTOCOL", "reason":"START_EVENT_MISSING"},
+    {"id":"zero-pid", "limit":0, "frames":[{"event":{"start":{"pid":0}}}], "stage":"start", "code":"PROTOCOL", "reason":"START_EVENT_MISSING"},
+    {"id":"data-before-start", "limit":0, "frames":[{"event":{"data":{"stdout":"YQ=="}}}], "stage":"start", "code":"PROTOCOL", "reason":"START_EVENT_MISSING"},
+    {"id":"end-before-start", "limit":0, "frames":[{"event":{"end":{"exitCode":0,"exited":true}}}], "stage":"start", "code":"PROTOCOL", "reason":"START_EVENT_MISSING"},
+    {"id":"missing-end", "limit":0, "frames":[{"event":{"start":{"pid":42}}},{"event":{"data":{"stdout":"YQ=="}}}], "stage":"wait", "code":"PROTOCOL", "reason":"END_EVENT_MISSING"},
+    {"id":"duplicate-start", "limit":0, "frames":[{"event":{"start":{"pid":42}}},{"event":{"start":{"pid":43}}}], "stage":"wait", "code":"PROTOCOL", "reason":"COMMAND_EVENT_INVALID"},
+    {"id":"unexpected-pty-output", "limit":0, "frames":[{"event":{"start":{"pid":42}}},{"event":{"data":{"pty":"YQ=="}}}], "stage":"wait", "code":"PROTOCOL", "reason":"COMMAND_OUTPUT_INVALID"}
+  ]
+}

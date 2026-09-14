@@ -1,0 +1,1439 @@
+package ags // import "github.com/TencentCloudAgentRuntime/ags-go-sdk"
+
+Package ags provides native Sandbox control, files, processes, PTY, watch,
+pause/resume and Cloud Monitor metrics for Tencent Cloud Agent Runtime.
+
+Construct a Client with explicit region and credential options for services
+that use multiple accounts. The sandbox subpackage exposes environment-backed
+shortcuts returning the same Sandbox type. Control and Metrics use the same
+Tencent Cloud credential provider.
+
+Remote operations accept context.Context. Use deadlines, preserve structured
+errors with errors.As, and never infer that cancellation undid a side effect.
+The SDK does not automatically retry mutations. Create waits for readiness but
+never assumes deletion ownership of an accepted or replayed instance.
+
+Close a Sandbox to release only its local resources; issue Delete explicitly for
+owned remote resources with an independent cleanup context. PTY Close can signal
+the remote process, unlike Sandbox or background CommandHandle Close. Close
+readers and watches, drain bounded event streams, and do not mutate input maps,
+slices or pointed-to options concurrently with an operation.
+
+This pre-release SDK preserves service limitations. Connect can resume or extend
+lifetime; Get is read-only. List supports the current service's exact-value AND
+filters rather than inventing unsupported projections. Create Env submission
+does not establish runtime inheritance or recovery persistence.
+
+CONSTANTS
+
+const (
+	// DefaultMaxCodeEventBytes bounds one newline-delimited event from the Code service.
+	DefaultMaxCodeEventBytes = 1 << 20
+	// DefaultMaxCodeOutputBytes bounds retained stdout and stderr independently.
+	DefaultMaxCodeOutputBytes int64 = 4 << 20
+	// DefaultMaxCodeResultBytes bounds retained serialized result events.
+	DefaultMaxCodeResultBytes int64 = 4 << 20
+	// DefaultMaxCodeEvents bounds retained log and result event counts.
+	DefaultMaxCodeEvents = 4096
+	// DefaultCodeCallbackTimeout bounds observation of one user callback.
+	DefaultCodeCallbackTimeout = time.Second
+)
+const DefaultMaxOutputBytes int64 = 4 << 20
+    DefaultMaxOutputBytes limits each retained command-output stream to 4 MiB
+    when no explicit limit is supplied.
+
+const DefaultWatchBuffer = 32
+    DefaultWatchBuffer is the pending-event capacity when WatchOptions.Buffer is
+    zero.
+
+
+TYPES
+
+type Client struct {
+	// Has unexported fields.
+}
+    Client binds region, providers, endpoints and HTTP configuration. Construct
+    with NewClient; do not replace its public service pointer concurrently.
+
+func DefaultClient() (*Client, error)
+    DefaultClient lazily caches the first successfully configured
+    environment-backed client. Mode, endpoints and provider bindings then remain
+    fixed; do not change process environment to switch tenants. Use NewClient
+    for explicit multi-account configuration.
+
+func NewClient(opts ...ClientOption) (*Client, error)
+    NewClient constructs a client without creating a sandbox. Region defaults
+    from TENCENTCLOUD_REGION; request timeout defaults to 30 seconds.
+    Explicit control credentials are read for each signed request so temporary
+    credentials can rotate within one logical Cloud identity.
+
+func (c *Client) Sandboxes() *SandboxManager
+    Sandboxes returns the sandbox control service bound to this client's Cloud
+    identity.
+
+type ClientOption func(*clientConfig)
+    ClientOption configures NewClient. Use the provided With functions; private
+    configuration is not an extension API.
+
+func WithControlPlaneEndpoint(v string) ClientOption
+    WithControlPlaneEndpoint selects the official Cloud AGS endpoint (default
+    ags.tencentcloudapi.com).
+
+func WithCredential(v CloudCredential) ClientOption
+    WithCredential selects Cloud control and Metrics using a static
+    SecretID/SecretKey pair.
+
+func WithCredentialProvider(v CredentialProvider) ClientOption
+    WithCredentialProvider selects a concurrent, per-request credential source.
+
+func WithHTTPClient(v *http.Client) ClientOption
+    WithHTTPClient supplies trusted HTTP configuration; nil uses SDK defaults.
+    The SDK rejects redirects and reuses the transport without taking
+    ownership of the shared client. Do not log or forward credentials in custom
+    transports.
+
+func WithMonitorEndpoint(v string) ClientOption
+    WithMonitorEndpoint selects the official Cloud Monitor endpoint (default
+    monitor.tencentcloudapi.com).
+
+func WithRegion(v string) ClientOption
+    WithRegion selects the nonempty Tencent Cloud region, overriding
+    TENCENTCLOUD_REGION.
+
+func WithRequestTimeout(v time.Duration) ClientOption
+    WithRequestTimeout sets a positive per-request timeout (default 30 seconds).
+    Use context deadlines to bound orchestration and stream lifetime; this is
+    not a sandbox lifetime.
+
+func WithTemporaryCredential(v TemporaryCloudCredential) ClientOption
+    WithTemporaryCredential explicitly selects Cloud control using a static
+    SecretID, SecretKey, and optional session Token.
+
+type CloudCredential struct {
+	// SecretID and SecretKey authenticate Cloud control and Metrics requests; both must be nonempty.
+	SecretID, SecretKey string
+}
+    CloudCredential is an explicit Tencent Cloud SecretID/SecretKey pair.
+    Default formatting is redacted; do not serialize its exported fields into
+    logs.
+
+func (c CloudCredential) GoString() string
+    GoString returns a redacted Go-syntax representation.
+
+func (c CloudCredential) MarshalJSON() ([]byte, error)
+    MarshalJSON prevents accidental credential disclosure by encoding only a
+    redacted marker.
+
+func (c CloudCredential) MarshalText() ([]byte, error)
+    MarshalText prevents text-based serializers from receiving the credential
+    fields.
+
+func (c CloudCredential) Retrieve(ctx context.Context) (CloudCredential, error)
+    Retrieve implements CredentialProvider for an explicitly supplied static key
+    pair.
+
+func (c CloudCredential) String() string
+    String and GoString deliberately omit both credential fields.
+
+func (c CloudCredential) Valid() bool
+    Valid reports whether both fields are nonempty; it does not authenticate
+    with the service.
+
+type Code struct {
+	// Has unexported fields.
+}
+    Code executes source and manages execution contexts in one Sandbox
+    generation.
+
+func (c *Code) CreateContext(ctx context.Context, opts CreateCodeContextOptions) (*CodeContext, error)
+    CreateContext creates a managed context bound to the current Sandbox
+    generation.
+
+func (c *Code) Run(ctx context.Context, source string, opts RunCodeOptions, callbacks CodeCallbacks) (*CodeExecution, error)
+    Run executes source once, consumes the complete local response, and returns
+    bounded aggregates. Canceling ctx or invalidating the Sandbox generation
+    stops local observation but does not prove that the remote execution
+    stopped.
+
+type CodeCallbacks struct {
+	// OnStdout observes one standard-output fragment.
+	OnStdout func(string)
+	// OnStderr observes one standard-error fragment.
+	OnStderr func(string)
+	// OnResult observes one rich result without owning internal aggregation.
+	OnResult func(CodeResult)
+}
+    CodeCallbacks observes live events without owning protocol consumption.
+    A slow or panicking callback disables observation but does not stop bounded
+    result aggregation.
+
+type CodeContext struct {
+	// Has unexported fields.
+}
+    CodeContext is a managed execution context bound to one Sandbox and
+    generation. Its private identity prevents reconstruction from an ID or
+    transfer between Sandbox handles.
+
+func (c *CodeContext) CWD() string
+    CWD returns the working directory reported for this context.
+
+func (c *CodeContext) ID() string
+    ID returns the service-issued context ID.
+
+func (c *CodeContext) Language() string
+    Language returns the runtime language reported for this context.
+
+type CodeContextRef interface {
+	// Has unexported methods.
+}
+    CodeContextRef is a sealed reference accepted by RunCodeOptions. Construct
+    one through CreateContext or NewExternalCodeContextRef.
+
+type CodeExecution struct {
+	// Results contains retained rich results.
+	Results []CodeResult
+	// Stdout contains retained standard-output fragments.
+	Stdout []string
+	// Stderr contains retained standard-error fragments.
+	Stderr []string
+	// Error contains a remote execution failure; local failures are returned as Go errors.
+	Error *CodeExecutionError
+	// ExecutionCount is the runtime-reported execution ordinal when available.
+	ExecutionCount *int
+
+	// StdoutTruncated reports that retained stdout reached its configured limit.
+	StdoutTruncated bool
+	// StderrTruncated reports that retained stderr reached its configured limit.
+	StderrTruncated bool
+	// ResultsTruncated reports that retained result bytes reached their configured limit.
+	ResultsTruncated bool
+	// EventsTruncated reports that retained event count reached its configured limit.
+	EventsTruncated bool
+	// CallbackError reports callback panic, timeout, or queue overflow without discarding the
+	// independently aggregated execution result.
+	CallbackError *Error
+}
+    CodeExecution contains bounded aggregates. A remote execution error appears
+    in Error; local transport, cancellation, generation, and protocol failures
+    are returned as Go errors.
+
+type CodeExecutionError struct {
+	// Name is the runtime-reported error class.
+	Name string
+	// Value is the runtime-reported error message.
+	Value string
+	// Traceback is the runtime-reported diagnostic stack and may be empty.
+	Traceback string
+}
+    CodeExecutionError is a remote language/runtime error reported as execution
+    data.
+
+type CodeResult struct {
+	// Text contains a plain-text representation when reported.
+	Text *string `json:"text,omitempty"`
+	// HTML contains an HTML representation when reported.
+	HTML *string `json:"html,omitempty"`
+	// Markdown contains a Markdown representation when reported.
+	Markdown *string `json:"markdown,omitempty"`
+	// SVG contains an SVG representation when reported.
+	SVG *string `json:"svg,omitempty"`
+	// PNG contains a PNG representation, encoded as reported by the runtime.
+	PNG *string `json:"png,omitempty"`
+	// JPEG contains a JPEG representation, encoded as reported by the runtime.
+	JPEG *string `json:"jpeg,omitempty"`
+	// PDF contains a PDF representation, encoded as reported by the runtime.
+	PDF *string `json:"pdf,omitempty"`
+	// Latex contains a LaTeX representation when reported.
+	Latex *string `json:"latex,omitempty"`
+	// JavaScript contains a JavaScript representation when reported.
+	JavaScript *string `json:"javascript,omitempty"`
+	// JSON contains structured JSON data when reported.
+	JSON map[string]any `json:"json,omitempty"`
+	// Data contains runtime-specific structured data when reported.
+	Data map[string]any `json:"data,omitempty"`
+	// Chart contains runtime-specific chart data when reported.
+	Chart map[string]any `json:"chart,omitempty"`
+	// Extra contains additional runtime metadata when reported.
+	Extra map[string]any `json:"extra,omitempty"`
+	// IsMainResult reports whether the runtime marked this as the primary result.
+	IsMainResult bool `json:"is_main_result"`
+}
+    CodeResult preserves the supported rich result representations.
+
+type CommandEvent struct {
+	// Type identifies standard output, standard error or terminal exit.
+	Type CommandEventType
+	// Data contains caller-owned bytes for output events; exit events may have none.
+	Data []byte
+	// Exit is the terminal status for CommandExit, otherwise nil.
+	Exit *ExitStatus
+}
+    CommandEvent contains caller-owned output or an exit status; there is no
+    replay.
+
+type CommandEventType string
+    CommandEventType distinguishes retained output from terminal status.
+
+const (
+	// CommandStdout carries retained standard-output bytes.
+	CommandStdout CommandEventType = "STDOUT"
+	// CommandStderr carries retained standard-error bytes.
+	CommandStderr CommandEventType = "STDERR"
+	// CommandExit carries terminal status independently retained by Wait.
+	CommandExit CommandEventType = "EXIT"
+)
+type CommandHandle struct {
+	// Has unexported fields.
+}
+    CommandHandle observes one process in one data-plane generation.
+    Close is local-only; PID must never be reused to control a process after
+    reconnection.
+
+func (h *CommandHandle) Close() error
+    Close stops local observation, preserving an already completed result.
+
+func (h *CommandHandle) Err() error
+    Err reports a locally observed terminal failure, or nil if none has been
+    recorded. A nil result while running does not imply successful process exit.
+
+func (h *CommandHandle) Events() <-chan CommandEvent
+    Events starts one live observer. Repeated calls return the same channel;
+    callers must not use multiple consumers. Wait-only callers need not
+    subscribe.
+
+func (h *CommandHandle) PID() uint32
+    PID returns the nonzero runtime PID observed before handle delivery,
+    not a reconnectable identity.
+
+func (h *CommandHandle) Signal(ctx context.Context, signal ProcessSignal) error
+    Signal sends TERM or KILL once to the observed process. Cancellation cannot
+    undo a submitted signal, and request success does not establish process
+    exit; use Wait.
+
+func (h *CommandHandle) Wait(ctx context.Context) (CommandResult, error)
+    Wait limits this wait only. Repeated calls return independent result copies.
+
+func (h *CommandHandle) Write(ctx context.Context, data []byte) error
+    Write serializes SendInput requests and waits for each ACK; it never
+    retries.
+
+type CommandListOptions struct {
+	// User selects the runtime account; empty defaults to User.
+	User SandboxUser
+}
+    CommandListOptions configures the runtime account used to list processes.
+
+type CommandOptions struct {
+	// Args is passed directly to the runtime command; nil means no arguments.
+	Args []string
+	// Env supplies per-process variables; nil supplies no overrides. Do not mutate the map during
+	// Run.
+	Env map[string]string
+	// Cwd selects the process working directory; empty preserves runtime defaults.
+	Cwd string
+	// User selects the runtime account; empty defaults to User.
+	User SandboxUser
+	// MaxOutputBytes bounds stdout and stderr independently; zero selects DefaultMaxOutputBytes
+	// and negative values are invalid.
+	MaxOutputBytes int64
+}
+    CommandOptions configures one foreground invocation. Its environment is
+    per-process, not persistent sandbox configuration.
+
+type CommandResult struct {
+	// ExitCode is the runtime-reported process exit code.
+	ExitCode int
+	// Stdout contains retained standard-output bytes; use the producing process's encoding to decode.
+	Stdout []byte
+	// Stderr contains independently retained standard-error bytes.
+	Stderr []byte
+	// StdoutTruncated indicates output exceeded its retention limit.
+	StdoutTruncated bool
+	// StderrTruncated indicates error output exceeded its independent retention limit.
+	StderrTruncated bool
+}
+    CommandResult contains a terminal exit and bounded byte output. A nonzero
+    exit code is data, not a transport error.
+
+type Commands struct {
+	// Has unexported fields.
+}
+    Commands executes runtime processes without automatic replay of command side
+    effects.
+
+func (c *Commands) Connect(ctx context.Context, pid uint32, opts ConnectCommandOptions) (*CommandHandle, error)
+    Connect attaches a generation-bound handle to an existing nonzero PID.
+    PID validity and cross-generation availability are decided by the runtime;
+    a new Sandbox generation does not make an old handle reusable.
+
+func (c *Commands) List(ctx context.Context, options ...CommandListOptions) ([]ProcessInfo, error)
+    List returns the processes visible in the current Sandbox generation.
+    At most one options value is accepted; omitting it selects User.
+
+func (c *Commands) Run(ctx context.Context, command string, opts CommandOptions) (CommandResult, error)
+    Run executes one required runtime command and returns bounded stdout/stderr
+    plus exit code. Nonzero process exit is data, not a transport error.
+    There is no automatic command replay; cancellation does not prove remote
+    termination.
+
+func (c *Commands) Start(ctx context.Context, command string, opts StartOptions) (*CommandHandle, error)
+    Start waits for a nonzero PID. Its context owns the observation lifetime;
+    cancellation/Close never sends a remote signal. Use Signal explicitly.
+
+type ConnectCommandOptions struct {
+	// User selects the runtime account used for subsequent input and signals.
+	User SandboxUser
+	// MaxOutputBytes bounds newly observed stdout and stderr independently.
+	MaxOutputBytes int64
+}
+    ConnectCommandOptions configures observation and control of an existing
+    runtime process.
+
+type ConnectOptions struct {
+	// Timeout defaults to five minutes. Connect never intentionally shortens a
+	// running sandbox's remaining lifetime. Running updates require at least 300 seconds;
+	// paused resume accepts at least 30 seconds. Both allow up to 24 hours.
+	Timeout *time.Duration
+}
+    ConnectOptions controls sandbox lifetime, not the HTTP or context deadline.
+
+type CreateCodeContextOptions struct {
+	// Language selects the runtime language; empty defaults to python.
+	Language string
+	// CWD selects the context working directory; empty defaults to /home/user.
+	CWD string
+}
+    CreateCodeContextOptions configures a new context. Empty values default to
+    python and /home/user respectively.
+
+type CreateOptions struct {
+	// Tool identifies the existing runtime configuration; exactly one ID or Name is required.
+	Tool ToolRef
+	// Timeout is the requested sandbox lifetime, not the operation deadline. Nil preserves service
+	// defaults; non-nil must be 30 seconds to 24 hours, subject to service restrictions.
+	Timeout *time.Duration
+	// ClientToken is optional Cloud create idempotency (at most 64 characters). Persist and reuse
+	// identical parameters for recovery.
+	ClientToken string
+	// Metadata supplies string labels copied before submission.
+	Metadata map[string]string
+	// Env is submitted at creation. Runtime initialization and persistence belong to the service.
+	Env map[string]string
+	// MountOptions overrides storage mounts declared by the selected Tool. The slice and any
+	// optional ReadOnly values are copied before the request is sent.
+	MountOptions []MountOption
+	// AuthMode controls access to Sandbox ports. Empty preserves the service default.
+	AuthMode SandboxAuthMode
+}
+    CreateOptions configures a new remote sandbox. Do not mutate maps or
+    pointed-to values during an operation; creation can incur charges.
+
+func (o CreateOptions) GoString() string
+    GoString returns the same redacted representation as String.
+
+func (o CreateOptions) String() string
+    String omits options that may contain credentials or sensitive environment
+    values.
+
+type CredentialProvider interface {
+	// Retrieve resolves the Cloud credential pair for a signed request. Honor cancellation;
+	// refreshed values must remain within one tenant.
+	Retrieve(context.Context) (CloudCredential, error)
+}
+    CredentialProvider retrieves credentials for each signed request.
+    Implementations must support concurrent calls and honor cancellation.
+    Refreshing providers own their caching policy; the SDK never caches the
+    returned secret.
+
+type EnvironmentCredentials struct{}
+    EnvironmentCredentials reads TENCENTCLOUD_SECRET_ID,
+    TENCENTCLOUD_SECRET_KEY, and the optional TENCENTCLOUD_TOKEN for each
+    request. Environment variables must not be changed concurrently by the
+    caller.
+
+func (EnvironmentCredentials) Retrieve(ctx context.Context) (CloudCredential, error)
+    Retrieve reads the current environment pair and checks cancellation.
+    Presence is validated before signed requests; this method itself makes no
+    network call.
+
+func (EnvironmentCredentials) RetrieveTemporary(ctx context.Context) (TemporaryCloudCredential, error)
+    RetrieveTemporary reads the complete current environment credential without
+    making a network request.
+
+type Error struct {
+	// Code is the stable category used by errors.Is comparisons.
+	Code ErrorCode
+	// Reason is a diagnostic identifier, Operation names the SDK operation, and RequestID is
+	// optional service correlation data.
+	Reason, Operation, RequestID string
+	// Retryable classifies a potentially transient error; it never authorizes replay of a side
+	// effect.
+	Retryable bool
+	// Cause preserves the wrapped error. Caller-provided causes can contain sensitive data; do
+	// not log them blindly.
+	Cause error
+	// InstanceID is set when creation was accepted but waiting/connecting failed.
+	// The instance may still exist; the SDK never assumes ownership of a replay.
+	InstanceID string
+	// Mutation is optional evidence for a failed update; nil does not mean NOT_SENT.
+	Mutation *MutationInfo
+}
+    Error retains branchable semantics without including secrets or response
+    bodies.
+
+func (e *Error) Error() string
+    Error formats the operation, category and diagnostic reason without
+    rendering Cause, InstanceID or a raw response.
+
+func (e *Error) Is(target error) bool
+    Is matches another nonempty SDK error category; it does not compare
+    operation, request ID or reason.
+
+func (e *Error) Unwrap() error
+    Unwrap exposes the underlying cause for errors.As and errors.Is.
+
+type ErrorCode string
+    ErrorCode is the stable public error category.
+
+const (
+	// InvalidArgument reports invalid caller input.
+	InvalidArgument ErrorCode = "INVALID_ARGUMENT"
+	// Unauthenticated reports missing or rejected authentication.
+	Unauthenticated ErrorCode = "UNAUTHENTICATED"
+	// PermissionDenied reports insufficient permission or unavailable required credential
+	// capability.
+	PermissionDenied ErrorCode = "PERMISSION_DENIED"
+	// NotFound reports an absent resource.
+	NotFound ErrorCode = "NOT_FOUND"
+	// Conflict reports an incompatible resource or local-handle state.
+	Conflict ErrorCode = "CONFLICT"
+	// ResourceExhausted reports a quota, capacity or bounded-buffer limit.
+	ResourceExhausted ErrorCode = "RESOURCE_EXHAUSTED"
+	// DeadlineExceeded reports an expired operation budget, not proof of remote cancellation.
+	DeadlineExceeded ErrorCode = "DEADLINE_EXCEEDED"
+	// Canceled reports local cancellation, not proof of remote termination.
+	Canceled ErrorCode = "CANCELED"
+	// Unavailable reports a service or transport failure.
+	Unavailable ErrorCode = "UNAVAILABLE"
+	// InstanceNotReady reports a sandbox whose data plane is not ready.
+	InstanceNotReady ErrorCode = "INSTANCE_NOT_READY"
+	// InstancePaused reports an invalidated or paused data-plane generation.
+	InstancePaused ErrorCode = "INSTANCE_PAUSED"
+	// Protocol reports malformed or inconsistent wire data.
+	Protocol ErrorCode = "PROTOCOL"
+	// Internal reports an internal SDK failure.
+	Internal ErrorCode = "INTERNAL"
+	// Unsupported reports a capability unavailable in the selected mode or adapter.
+	Unsupported ErrorCode = "UNSUPPORTED"
+)
+type ExistsOptions struct {
+	// User selects the logical runtime account; empty defaults to User.
+	User SandboxUser
+}
+    ExistsOptions selects the remote identity for an existence query.
+
+type ExitReason string
+    ExitReason preserves the runtime's normalized reason, including UNKNOWN when
+    ambiguous.
+
+type ExitStatus struct {
+	// Code is the reported process exit code.
+	Code int
+	// Exited is the runtime's exited flag, not an SDK success predicate.
+	Exited bool
+	// Reason is the normalized reason, potentially UNKNOWN when the runtime is ambiguous.
+	Reason ExitReason
+	// Message is runtime status text, not a stable machine-readable error contract.
+	Message string
+}
+    ExitStatus preserves runtime termination information without guessing signal
+    numbers from diagnostic text.
+
+type ExternalCodeContextRef struct {
+	// Has unexported fields.
+}
+    ExternalCodeContextRef explicitly represents a service-issued context ID
+    whose ownership, existence, and generation validity can only be checked by
+    the remote service.
+
+func NewExternalCodeContextRef(id string) (*ExternalCodeContextRef, error)
+    NewExternalCodeContextRef validates and wraps an existing service context
+    ID. It does not prove that the context exists or belongs to a Sandbox.
+
+func (r *ExternalCodeContextRef) ID() string
+    ID returns the caller-supplied external context ID.
+
+type FileEvent struct {
+	// WatchID is a stable SDK-local identity, not a server resume token.
+	WatchID string
+	// Sequence increases within this local watch, not across watchers or reconnections.
+	Sequence uint64
+	// Type identifies the reported change.
+	Type FileEventType
+	// Path is the affected path reported by the runtime.
+	Path string
+	// OldPath is nil when unavailable; the current wire contract does not supply a rename source.
+	OldPath *string
+	// Entry is optional best-effort metadata; remove events and failed lookups leave it nil.
+	Entry *FileInfo
+}
+    FileEvent is a runtime notification, not a durable or atomically enriched
+    change-log entry.
+
+type FileEventType string
+    FileEventType describes a runtime filesystem notification without
+    guaranteeing durable delivery.
+
+const (
+	// FileCreate reports entry creation.
+	FileCreate FileEventType = "CREATE"
+	// FileWrite reports content modification.
+	FileWrite FileEventType = "WRITE"
+	// FileRemove reports removal; metadata may no longer be available.
+	FileRemove FileEventType = "REMOVE"
+	// FileRename reports a rename without guaranteeing the old path is supplied.
+	FileRename FileEventType = "RENAME"
+	// FileChmod reports a permission change.
+	FileChmod FileEventType = "CHMOD"
+)
+type FileInfo struct {
+	// Name is the reported entry name.
+	Name string
+	// Path is the reported entry path.
+	Path string
+	// Type is File, Directory, or UnknownFileType when absent or unrecognized.
+	Type FileType
+	// Size is the reported byte count; a wire default does not prove field presence.
+	Size int64
+	// Mode contains runtime mode bits.
+	Mode uint32
+	// Permissions is runtime permission text and may be empty when not returned.
+	Permissions string
+	// Owner and Group preserve the runtime-reported account names. Empty means unavailable.
+	Owner, Group string
+	// ModifiedAt is the reported modification timestamp; zero means unavailable.
+	ModifiedAt time.Time
+	// SymlinkTarget is nil when not reported; the SDK does not resolve a missing target.
+	SymlinkTarget *string
+}
+    FileInfo contains runtime-reported metadata. Missing type or link
+    information must not be interpreted as a regular file.
+
+type FileListOptions struct {
+	// User defaults to User when empty.
+	User SandboxUser
+	// Depth is nonnegative; zero defaults to 1. Recursive traversal semantics belong to the runtime.
+	Depth int
+}
+    FileListOptions configures a filesystem listing, not sandbox control-plane
+    pagination.
+
+type FileType string
+    FileType preserves known file/directory types and UnknownFileType for
+    missing runtime information.
+
+const (
+	// UnknownFileType preserves omitted or unrecognized runtime file types.
+	UnknownFileType FileType = "UNKNOWN"
+	// File means the runtime explicitly reported a file.
+	File FileType = "FILE"
+	// Directory means the runtime explicitly reported a directory.
+	Directory FileType = "DIRECTORY"
+)
+type Files struct {
+	// Has unexported fields.
+}
+    Files operates on the current data-plane generation; filesystem enforcement
+    belongs to the runtime.
+
+func (f *Files) Exists(ctx context.Context, path string, opts ExistsOptions) (bool, error)
+    Exists reports whether a remote entry exists. A NotFound response is
+    returned as false, nil; authentication, authorization, transport and
+    protocol failures are preserved.
+
+func (f *Files) List(ctx context.Context, path string, opts FileListOptions) ([]FileInfo, error)
+    List returns metadata under a nonempty runtime path. Zero Depth selects 1;
+    negative depth is invalid. Missing types or link targets are not inferred.
+
+func (f *Files) MakeDir(ctx context.Context, path string, opts MakeDirOptions) (FileInfo, error)
+    MakeDir creates a remote directory using the runtime's filesystem semantics.
+
+func (f *Files) Move(ctx context.Context, source, destination string, opts MoveOptions) (FileInfo, error)
+    Move moves a remote entry. It does not emulate no-overwrite or
+    cross-filesystem copying.
+
+func (f *Files) Read(ctx context.Context, path string, opts ReadOptions) (io.ReadCloser, error)
+    Read opens a streamed response for a nonempty path. Close the returned
+    reader even after a partial read; its context and sandbox generation govern
+    its lifetime.
+
+func (f *Files) Remove(ctx context.Context, path string, opts RemoveOptions) error
+    Remove removes a remote entry. Cancellation does not establish that removal
+    was not applied.
+
+func (f *Files) Stat(ctx context.Context, path string, opts StatOptions) (FileInfo, error)
+    Stat returns remote metadata without modifying the entry.
+
+func (f *Files) Watch(ctx context.Context, path string, opts WatchOptions) (*WatchHandle, error)
+    Watch waits for the start barrier and returns a bounded notification stream.
+    Drain events promptly and close when finished. Context cancellation or
+    generation replacement ends this non-resumable observation.
+
+func (f *Files) Write(ctx context.Context, path string, body io.Reader, opts WriteOptions) (FileInfo, error)
+    Write incrementally uploads body to a nonempty remote path without
+    whole-file buffering or replay. The caller owns body and any underlying
+    closer; arrange for blocked reads to unblock on cancellation. Failure may
+    leave partial remote data.
+
+type MakeDirOptions struct {
+	// User selects the logical runtime account; empty defaults to User.
+	User SandboxUser
+}
+    MakeDirOptions selects the remote identity. Parent/existing-directory
+    behavior is runtime-defined.
+
+type MetricPoint struct {
+	// Timestamp is the sample time.
+	Timestamp time.Time
+	// Value uses the containing series' Unit.
+	Value float64
+}
+    MetricPoint is one real Monitor sample; absent samples are not synthesized
+    as zero.
+
+type MetricSeries struct {
+	// Name is the native metric identifier.
+	Name SandboxMetricName
+	// Unit is the SDK unit for this metric.
+	Unit MetricUnit
+	// Points is ordered by ascending timestamp; empty is not evidence of telemetry collection.
+	Points []MetricPoint
+	// Resolution is the returned sampling period, or the requested period when the service omits
+	// it.
+	Resolution time.Duration
+}
+    MetricSeries preserves one successful series, including a successful
+    response with no points.
+
+type MetricUnit string
+    MetricUnit is the native SDK's display unit; Cores is dimensionless on the
+    wire.
+
+const (
+	// Percent is a percentage unit.
+	Percent MetricUnit = "PERCENT"
+	// Cores is CPU-core usage; the service wire unit is dimensionless.
+	Cores MetricUnit = "CORES"
+	// Bytes is a byte-count unit.
+	Bytes MetricUnit = "BYTES"
+	// BytesPerSecond is a byte-throughput unit.
+	BytesPerSecond MetricUnit = "BYTES_PER_SECOND"
+)
+type Metrics struct {
+	// Has unexported fields.
+}
+    Metrics queries public Cloud Monitor by sandbox identity without connecting
+    envd.
+
+func (m *Metrics) Get(ctx context.Context, q MetricsQuery) (MetricsResult, error)
+    Get queries this sandbox's Metrics using Cloud credentials, without opening
+    envd. Context cancellation takes precedence over partial results. Successful
+    empty series contain no fabricated points; inspect Unavailable for partial
+    failures.
+
+type MetricsQuery struct {
+	// Start and End bound the query in UTC at whole-second wire precision. Nil End means now; nil
+	// Start means 48 hours before End. Start must not be after End.
+	Start, End *time.Time
+	// Names selects unique supported metrics. Nil selects all ten; an explicitly empty slice is
+	// invalid.
+	Names []SandboxMetricName
+	// Period requests whole-second resolution, at least one second. Nil selects five minutes;
+	// actual series resolution may differ.
+	Period *time.Duration
+}
+    MetricsQuery selects Cloud Monitor series and their time window.
+
+type MetricsResult struct {
+	// Series contains successful series ordered by name, possibly with zero points.
+	Series []MetricSeries
+	// Unavailable lists failed series ordered by name; inspect it even when Get returns no error.
+	Unavailable []UnavailableMetric
+	// Resolution is the shared series resolution, or zero when successful series disagree.
+	Resolution time.Duration
+	// Truncated indicates at least one response reported truncation.
+	Truncated bool
+}
+    MetricsResult contains successful series and explicit per-series failures.
+    All-series failure returns an error instead.
+
+type MountOption struct {
+	// Name is the storage configuration name in the Tool and is required.
+	Name string
+	// MountPath optionally overrides the instance-local mount point.
+	MountPath string
+	// SubPath optionally selects a path inside the backing storage.
+	SubPath string
+	// ReadOnly optionally overrides the Tool's read/write setting. Nil preserves it.
+	ReadOnly *bool
+}
+    MountOption configures one storage mount declared by the selected Tool.
+
+type MoveOptions struct {
+	// User selects the logical runtime account; empty defaults to User.
+	User SandboxUser
+}
+    MoveOptions selects the remote identity. No atomic no-overwrite guarantee is
+    implied.
+
+type MutationInfo struct {
+	// State distinguishes evidence that nothing was sent from an unknown submission outcome.
+	State MutationState
+	// Phase identifies where the failure was observed.
+	Phase MutationPhase
+	// InstanceID is the mutation target, not proof that the caller owns cleanup.
+	InstanceID string
+}
+    MutationInfo describes evidence about a failed mutation, not retry
+    permission.
+
+type MutationPhase string
+    MutationPhase identifies where a mutation failure was observed.
+
+const (
+	// MutationValidation identifies input validation or local lifecycle acquisition.
+	MutationValidation MutationPhase = "VALIDATION"
+	// MutationReadMetadata identifies the pre-mutation Cloud metadata read.
+	MutationReadMetadata MutationPhase = "READ_METADATA"
+	// MutationSubmit identifies mutation submission or its immediate preparation.
+	MutationSubmit MutationPhase = "SUBMIT"
+)
+type MutationState string
+    MutationState describes submission evidence, not permission to retry.
+
+const (
+	// MutationNotSent means evidence establishes that no mutation was submitted.
+	MutationNotSent MutationState = "NOT_SENT"
+	// MutationUnknown means the remote result is uncertain; do not assume the mutation did not
+	// occur.
+	MutationUnknown MutationState = "UNKNOWN"
+)
+type PTY struct {
+	// Has unexported fields.
+}
+    PTY opens generation-bound interactive terminals with explicit input and
+    resize operations.
+
+func (p *PTY) Open(ctx context.Context, opts PTYOptions) (*PTYSession, error)
+    Open waits for the terminal start barrier. Supply a command and positive
+    Cols/Rows, then drain Events concurrently with Wait to avoid bounded-buffer
+    overflow. Close the session when finished.
+
+type PTYEvent struct {
+	// Type identifies start, output or terminal end.
+	Type PTYEventType
+	// Data contains terminal output bytes; start/end notifications may have no bytes.
+	Data []byte
+	// Exit is populated for PTYEnd when the runtime reports a terminal result.
+	Exit *ExitStatus
+}
+    PTYEvent carries one terminal notification; output is not separated into
+    stdout and stderr.
+
+type PTYEventType string
+    PTYEventType identifies start, output or terminal end within one PTY stream.
+
+const (
+	// PTYStart reports that the start barrier was observed.
+	PTYStart PTYEventType = "START"
+	// PTYOutput carries terminal bytes.
+	PTYOutput PTYEventType = "OUTPUT"
+	// PTYEnd reports terminal process status.
+	PTYEnd PTYEventType = "END"
+)
+type PTYOptions struct {
+	// Command is the required runtime command.
+	Command string
+	// Args supplies command arguments directly; nil means none.
+	Args []string
+	// Env supplies per-process variables, not persistent sandbox configuration.
+	Env map[string]string
+	// Cwd selects the working directory; empty preserves runtime defaults.
+	Cwd string
+	// User defaults to User when empty.
+	User SandboxUser
+	// Cols is the required positive terminal width in character cells.
+	Cols uint32
+	// Rows is the required positive terminal height in character cells.
+	Rows uint32
+}
+    PTYOptions configures an interactive runtime process. Callers must supply
+    positive Cols and Rows.
+
+type PTYSession struct {
+	// Has unexported fields.
+}
+    PTYSession owns one terminal stream. Drain Events concurrently with Wait
+    because output always enters the bounded event channel.
+
+func (s *PTYSession) Close() error
+    Close idempotently sends TERM to a still-live process with a three-second
+    signal-request budget, then closes local resources. It does not wait for
+    proof of exit or send KILL. Generation invalidation instead closes locally
+    without signaling; neither path deletes the sandbox.
+
+func (s *PTYSession) Events() <-chan PTYEvent
+    Events returns the bounded 32-event terminal channel. Consume continuously
+    even while waiting; overflow fails with ResourceExhausted.
+
+func (s *PTYSession) ID() string
+    ID returns a stable SDK-local handle identity, not a server reconnect token.
+
+func (s *PTYSession) Resize(ctx context.Context, cols, rows uint32) error
+    Resize requests positive terminal dimensions in character cells without
+    replay.
+
+func (s *PTYSession) Wait(ctx context.Context) (ExitStatus, error)
+    Wait observes terminal status until ctx expires; it does not signal the
+    process. Drain Events concurrently, since unconsumed output can fail the
+    observation.
+
+func (s *PTYSession) Write(ctx context.Context, data []byte) error
+    Write sends nonempty terminal input once. Do not mutate data during the
+    call; cancellation cannot undo accepted input.
+
+type PauseMode string
+    PauseMode selects memory or disk pause as supported by the service.
+
+const (
+	// PauseMemory requests an in-memory pause.
+	PauseMemory PauseMode = "MEMORY"
+	// PauseDisk requests disk-backed pause without promising ephemeral-file retention.
+	PauseDisk PauseMode = "DISK"
+)
+type PauseOptions struct {
+	// Mode defaults to PauseMemory when empty. PauseDisk does not promise ephemeral-file retention.
+	Mode PauseMode
+}
+    PauseOptions chooses a supported pause mode.
+
+type ProcessInfo struct {
+	// PID is the runtime process identifier in the current Sandbox generation.
+	PID uint32
+	// Tag is an optional runtime-defined process label.
+	Tag *string
+	// Cmd is the reported executable or command.
+	Cmd string
+	// Args contains a caller-owned copy of reported arguments.
+	Args []string
+	// Env contains a caller-owned copy of reported process environment entries.
+	Env map[string]string
+	// CWD is the reported working directory when available.
+	CWD *string
+}
+    ProcessInfo describes a runtime process without exposing protobuf values.
+
+type ProcessSignal string
+    ProcessSignal selects explicit remote termination; observation cancellation
+    alone sends no signal.
+
+const (
+	// SignalTERM requests cooperative remote termination.
+	SignalTERM ProcessSignal = "TERM"
+	// SignalKILL requests forced remote termination.
+	SignalKILL ProcessSignal = "KILL"
+)
+type ReadOptions struct {
+	// User defaults to User when empty. Runtime enforcement, not the SDK, defines filesystem
+	// authorization.
+	User SandboxUser
+}
+    ReadOptions selects the logical runtime user for a streamed read.
+
+type RemoveOptions struct {
+	// User selects the logical runtime account; empty defaults to User.
+	User SandboxUser
+}
+    RemoveOptions selects the remote identity. Directory removal follows the
+    verified runtime contract.
+
+type ResumeOptions struct {
+	// Timeout requests a resumed lifetime; nil preserves the service default. Service validation
+	// and restrictions apply.
+	Timeout *time.Duration
+}
+    ResumeOptions controls remote lifetime on resume, separately from the
+    caller's context deadline.
+
+type RunCodeOptions struct {
+	// Language selects the runtime language when Context is nil; empty defaults to python.
+	Language string
+	// Context selects a managed or explicit external execution context. It is mutually exclusive
+	// with Language.
+	Context CodeContextRef
+	// Env supplies variables for this execution. The SDK copies the map before submission.
+	Env map[string]string
+
+	// MaxEventBytes bounds one wire event; zero selects DefaultMaxCodeEventBytes.
+	MaxEventBytes int
+	// MaxOutputBytes bounds retained stdout and stderr independently; zero selects the default.
+	MaxOutputBytes int64
+	// MaxResultBytes bounds retained serialized result data; zero selects the default.
+	MaxResultBytes int64
+	// MaxEvents bounds retained log and result event counts; zero selects the default.
+	MaxEvents int
+	// CallbackTimeout bounds one user callback; zero selects DefaultCodeCallbackTimeout.
+	CallbackTimeout time.Duration
+}
+    RunCodeOptions configures one execution. Language defaults to python when
+    Context is nil. Language and Context are mutually exclusive.
+
+type Sandbox struct {
+	// Has unexported fields.
+}
+    Sandbox is the only P0 instance object. Its services are facades over one
+    connection manager.
+
+func (s *Sandbox) Close() error
+    Close releases this handle's local data-plane resources. It is idempotent
+    and never deletes the remote sandbox or closes a shared HTTP client. Info,
+    Metrics and explicit Delete remain available; Connect creates a new usable
+    handle.
+
+func (s *Sandbox) Code() *Code
+    Code returns the execution service bound to this Sandbox and its current
+    generation.
+
+func (s *Sandbox) Commands() *Commands
+    Commands returns the process service bound to this Sandbox. Started handles
+    are invalidated when the Sandbox generation changes.
+
+func (s *Sandbox) Delete(ctx context.Context) error
+    Delete invalidates local streams and explicitly stops the remote instance,
+    resuming a paused Cloud instance first if needed. It is not an ownership
+    check; only delete resources the caller is authorized to remove.
+
+func (s *Sandbox) Files() *Files
+    Files returns the filesystem service bound to this Sandbox. The service
+    follows the Sandbox generation and cannot be rebound to another Client or
+    instance.
+
+func (s *Sandbox) GetHost(port int) (string, error)
+    GetHost returns the public hostname for a valid Sandbox port. It does not
+    include a URL scheme or credentials and does not probe whether the selected
+    Tool exposes the port.
+
+func (s *Sandbox) ID() string
+    ID returns the immutable remote identity.
+
+func (s *Sandbox) Info(ctx context.Context) (SandboxInfo, error)
+    Info reads current control-plane information without changing lifetime or
+    acquiring envd.
+
+func (s *Sandbox) Metrics() *Metrics
+    Metrics returns the Cloud Monitor service bound to the same Client identity
+    as the Sandbox control plane.
+
+func (s *Sandbox) PTY() *PTY
+    PTY returns the interactive-terminal service bound to this Sandbox.
+
+func (s *Sandbox) Pause(ctx context.Context, opts PauseOptions) (SandboxInfo, error)
+    Pause invalidates existing local streams before requesting pause. Empty
+    Mode selects memory. Old handles remain invalid even if the pause fails;
+    use the current generation or reconnect. Cancellation does not establish the
+    remote outcome.
+
+func (s *Sandbox) Resume(ctx context.Context, opts ResumeOptions) (SandboxInfo, error)
+    Resume requests resume, acquires fresh connection material and waits for
+    data-plane readiness. It never revives a locally closed Sandbox; obtain a
+    new handle with Connect instead.
+
+func (s *Sandbox) Update(ctx context.Context, opts UpdateOptions) (UpdateResult, error)
+    Update confirms an update without an implicit Info call. A failed
+    submission can have an unknown outcome; it is never retried or rolled back
+    automatically.
+
+func (s *Sandbox) WaitFor(ctx context.Context, target SandboxState) (SandboxInfo, error)
+    WaitFor polls until target is observed or ctx expires. Failed and Stopped
+    states reject other targets. Waiting does not mutate the sandbox.
+
+type SandboxAuthMode string
+    SandboxAuthMode controls authentication for Sandbox data-plane ports.
+    It is unrelated to Tencent Cloud credentials used by Client.
+
+const (
+	// SandboxAuthDefault uses the service default, currently token authentication.
+	SandboxAuthDefault SandboxAuthMode = "DEFAULT"
+	// SandboxAuthToken requires the Sandbox instance token on all ports.
+	SandboxAuthToken SandboxAuthMode = "TOKEN"
+	// SandboxAuthNone disables authentication on all Sandbox ports.
+	SandboxAuthNone SandboxAuthMode = "NONE"
+	// SandboxAuthPublic requires the instance token on the envd management port and exposes
+	// other configured ports without it.
+	SandboxAuthPublic SandboxAuthMode = "PUBLIC"
+)
+type SandboxInfo struct {
+	// ID is the sandbox identity; ToolID and ToolName describe the tool when reported.
+	ID, ToolID, ToolName string
+	// State preserves the available native state; Unknown means no specific
+	// state is established.
+	State SandboxState
+	// CreatedAt and ExpiresAt are reported timestamps; zero values represent unavailable timestamps.
+	CreatedAt, ExpiresAt time.Time
+	// Metadata contains returned labels, not creation Env or runtime environment values.
+	Metadata map[string]string
+}
+    SandboxInfo is a control-plane description.
+
+type SandboxListOptions struct {
+	// ToolID filters by exact tool identity.
+	ToolID string
+	// Offset is a nonnegative Cloud position. Limit is 1..100; zero
+	// defaults to 20.
+	Offset, Limit int
+	// States intersects with Metadata. Empty preserves the service default.
+	States []SandboxState
+	// Metadata uses exact values across keys (AND). Multi-value OR is not yet
+	// available in the current service and is rejected before HTTP.
+	Metadata map[string][]string
+}
+    SandboxListOptions selects one server-side page using Cloud offsets.
+
+type SandboxManager struct {
+	// Has unexported fields.
+}
+    SandboxManager provides control-plane operations and returns the same
+    Sandbox type as the shortcut package.
+
+func (m *SandboxManager) Connect(ctx context.Context, id string, options ...ConnectOptions) (*Sandbox, error)
+    Connect resumes a paused sandbox and extends a running sandbox only when its
+    remaining lifetime is shorter than Timeout (five minutes by default).
+
+func (m *SandboxManager) Create(ctx context.Context, opts CreateOptions) (*Sandbox, error)
+    Create submits one sandbox creation and waits for RUNNING and data-plane
+    readiness within ctx. It never retries or automatically deletes an accepted
+    resource. Post-acceptance errors preserve a known InstanceID. Returned
+    handles require local Close and explicitly owned remote Delete.
+
+func (m *SandboxManager) Delete(ctx context.Context, id string) error
+    Delete explicitly stops an instance by ID without acquiring a data-plane
+    connection. This also permits cleanup after a failed Create readiness check.
+
+func (m *SandboxManager) Get(ctx context.Context, id string) (SandboxInfo, error)
+    Get reads the exact nonempty sandbox ID without extending lifetime, resuming
+    or connecting envd. Missing resources return NotFound.
+
+func (m *SandboxManager) GetMetrics(ctx context.Context, id string, q MetricsQuery) (MetricsResult, error)
+    GetMetrics queries Cloud Monitor without connecting the sandbox data plane.
+
+func (m *SandboxManager) List(ctx context.Context, opts SandboxListOptions) (SandboxPage, error)
+    List returns one server-filtered Cloud page. Limit defaults to 20.
+    Unsupported filters fail explicitly rather than being dropped.
+
+type SandboxMetricName string
+    SandboxMetricName identifies one of the ten supported public Cloud Monitor
+    metrics.
+
+const (
+	// SandboxCPUUsagePercent measures CPU utilization in percent.
+	SandboxCPUUsagePercent SandboxMetricName = "SandboxCpuUsagePercent"
+	// SandboxCPUUsedCores measures consumed CPU cores.
+	SandboxCPUUsedCores SandboxMetricName = "SandboxCpuUsedCores"
+	// SandboxDiskReadBytesPerSecond measures disk-read throughput.
+	SandboxDiskReadBytesPerSecond SandboxMetricName = "SandboxDiskReadBytesPerSecond"
+	// SandboxDiskWriteBytesPerSecond measures disk-write throughput.
+	SandboxDiskWriteBytesPerSecond SandboxMetricName = "SandboxDiskWriteBytesPerSecond"
+	// SandboxFSUsagePercent measures filesystem utilization in percent.
+	SandboxFSUsagePercent SandboxMetricName = "SandboxFsUsagePercent"
+	// SandboxFSUsedBytes measures filesystem usage in bytes.
+	SandboxFSUsedBytes SandboxMetricName = "SandboxFsUsedBytes"
+	// SandboxMemoryUsagePercent measures memory utilization in percent.
+	SandboxMemoryUsagePercent SandboxMetricName = "SandboxMemoryUsagePercent"
+	// SandboxMemoryUsedBytes measures memory usage in bytes.
+	SandboxMemoryUsedBytes SandboxMetricName = "SandboxMemoryUsedBytes"
+	// SandboxNetworkRxBytesPerSecond measures received network throughput.
+	SandboxNetworkRxBytesPerSecond SandboxMetricName = "SandboxNetworkRxBytesPerSecond"
+	// SandboxNetworkTxBytesPerSecond measures transmitted network throughput.
+	SandboxNetworkTxBytesPerSecond SandboxMetricName = "SandboxNetworkTxBytesPerSecond"
+)
+type SandboxPage struct {
+	// Items contains the returned native or projected sandbox descriptions.
+	Items []SandboxInfo
+	// TotalCount is the server's count for the query, not merely len(Items).
+	TotalCount int
+	// NextOffset is the next Cloud offset, or nil when no continuation is reported.
+	NextOffset *int
+}
+    SandboxPage preserves the service-reported page and total without
+    client-side filtering or invented lifecycle states.
+
+type SandboxState string
+    SandboxState is the native lifecycle state.
+
+const (
+	// Creating means the instance is being provisioned.
+	Creating SandboxState = "CREATING"
+	// Running means the service reports the instance running; data-plane readiness is checked
+	// separately.
+	Running SandboxState = "RUNNING"
+	// Pausing means pause is in progress.
+	Pausing SandboxState = "PAUSING"
+	// Paused means the service reports the instance paused.
+	Paused SandboxState = "PAUSED"
+	// Resuming means resume is in progress.
+	Resuming SandboxState = "RESUMING"
+	// Stopping means termination is in progress.
+	Stopping SandboxState = "STOPPING"
+	// Stopped is a terminal Native state. Explicit List filters preserve it and propagate service
+	// restrictions.
+	Stopped SandboxState = "STOPPED"
+	// Failed is the service's failure state.
+	Failed SandboxState = "FAILED"
+	// Unknown preserves an unavailable or unrecognized state.
+	Unknown SandboxState = "UNKNOWN"
+)
+type SandboxUser string
+    SandboxUser selects a logical runtime account, not an SDK-enforced
+    filesystem authorization boundary.
+
+const (
+	// User selects the runtime's user account and is the SDK default.
+	User SandboxUser = "USER"
+	// Root selects the runtime's root account; service enforcement still applies.
+	Root SandboxUser = "ROOT"
+)
+type StartOptions struct {
+	// Args supplies runtime command arguments; nil means none.
+	Args []string
+	// Env supplies per-process variables; nil means no overrides. The SDK copies the map at
+	// startup.
+	Env map[string]string
+	// Cwd is the working directory; empty preserves the runtime default.
+	Cwd string
+	// User selects the runtime account; empty defaults to User.
+	User SandboxUser
+	// MaxOutputBytes bounds each retained output stream separately; zero selects
+	// DefaultMaxOutputBytes and negative values are invalid.
+	MaxOutputBytes int64
+}
+    StartOptions configures one new process, not the sandbox's persistent
+    environment.
+
+type StatOptions struct {
+	// User selects the logical runtime account; empty defaults to User.
+	User SandboxUser
+}
+    StatOptions selects the remote identity for a metadata query.
+
+type TemporaryCloudCredential struct {
+	// SecretID and SecretKey authenticate Tencent Cloud requests; both are required.
+	SecretID, SecretKey string
+	// Token is the optional Tencent Cloud temporary security token, not a Sandbox instance token.
+	Token string
+}
+    TemporaryCloudCredential is a Tencent Cloud SecretID/SecretKey pair with
+    an optional session token. It implements both CredentialProvider and
+    TemporaryCredentialProvider so it can be passed to the existing provider
+    options. Default formatting is redacted.
+
+func (c TemporaryCloudCredential) GoString() string
+    GoString returns a redacted Go-syntax representation.
+
+func (c TemporaryCloudCredential) MarshalJSON() ([]byte, error)
+    MarshalJSON prevents accidental disclosure by encoding only a redacted
+    marker.
+
+func (c TemporaryCloudCredential) MarshalText() ([]byte, error)
+    MarshalText prevents text-based serializers from receiving any credential
+    field.
+
+func (c TemporaryCloudCredential) Retrieve(ctx context.Context) (CloudCredential, error)
+    Retrieve preserves compatibility with CredentialProvider while the optional
+    interface carries the token to SDK transports.
+
+func (c TemporaryCloudCredential) RetrieveTemporary(ctx context.Context) (TemporaryCloudCredential, error)
+    RetrieveTemporary returns the complete temporary credential after checking
+    cancellation.
+
+func (c TemporaryCloudCredential) String() string
+    String and GoString deliberately omit all credential fields.
+
+func (c TemporaryCloudCredential) Valid() bool
+    Valid reports whether the required ID/key pair is nonempty; Token may be
+    empty for long-lived credentials.
+
+type TemporaryCredentialProvider interface {
+	CredentialProvider
+	// RetrieveTemporary resolves a SecretID, SecretKey, and optional security token. Honor
+	// cancellation and keep refreshed values within one tenant.
+	RetrieveTemporary(context.Context) (TemporaryCloudCredential, error)
+}
+    TemporaryCredentialProvider optionally supplies a three-part Tencent
+    Cloud credential for each signed request. Providers passed to
+    WithCredentialProvider may implement this interface in addition to
+    CredentialProvider; two-part providers continue to work.
+
+type ToolRef struct {
+	// ID and Name are mutually exclusive.
+	ID, Name string
+}
+    ToolRef selects exactly one existing sandbox tool.
+
+type UnavailableMetric struct {
+	// Name identifies the failed query.
+	Name SandboxMetricName
+	// Code is the stable SDK failure category.
+	Code ErrorCode
+	// RequestID is the service request identifier when available; empty means absent.
+	RequestID string
+}
+    UnavailableMetric describes one failed series in a partial Metrics result.
+
+type UpdateOptions struct {
+	// Timeout requests a lifetime of 300..86400 whole seconds. Nil
+	// omits lifetime changes.
+	Timeout *time.Duration
+	// MetadataUpsert adds or replaces exact keys while retaining others. Nil/empty omits metadata
+	// changes; empty values are preserved, x- keys are rejected.
+	MetadataUpsert map[string]string
+}
+    UpdateOptions changes lifetime and upserts metadata. Empty fields are
+    omitted. Metadata updates require a single writer per remote instance.
+
+type UpdateResult struct {
+	// InstanceID identifies the sandbox whose mutation was acknowledged.
+	InstanceID string
+}
+    UpdateResult acknowledges one mutation; it does not imply a trailing
+    Describe or independently verified final state.
+
+type WatchHandle struct {
+	// Has unexported fields.
+}
+    WatchHandle owns one bounded local notification stream. Close it when
+    finished; it cannot survive generation replacement.
+
+func (h *WatchHandle) Close() error
+    Close idempotently ends local observation without deleting files or the
+    remote sandbox.
+
+func (h *WatchHandle) Err() error
+    Err returns the last observed stream error, including overflow. Nil before
+    channel closure does not prove successful completion.
+
+func (h *WatchHandle) Events() <-chan FileEvent
+    Events returns the watch's channel; use one consumer and drain until closed
+    before inspecting Err.
+
+type WatchOptions struct {
+	// User defaults to User when empty.
+	User SandboxUser
+	// Recursive requests descendant paths. IncludeEntry performs best-effort metadata lookup on
+	// non-remove events; it does not make the event and metadata atomic.
+	Recursive, IncludeEntry bool
+	// Buffer is the pending-event capacity; zero defaults to DefaultWatchBuffer. Negative values
+	// are invalid; overflow fails with ResourceExhausted.
+	Buffer int
+}
+    WatchOptions configures a generation-bound watch with bounded local
+    buffering.
+
+type WriteOptions struct {
+	// User defaults to User when empty; this is not an SDK-enforced authorization boundary.
+	User SandboxUser
+}
+    WriteOptions selects the logical runtime user for a streamed remote write.
+
+package sandbox // import "github.com/TencentCloudAgentRuntime/ags-go-sdk/sandbox"
+
+Package sandbox provides environment-backed shortcuts for the common
+single-identity Sandbox workflow.
+
+Create, Connect, Get, and List delegate to ags.DefaultClient().Sandboxes().
+Applications that use multiple Tencent Cloud identities, custom transports,
+or explicit endpoints should construct separate ags.Client values instead. Both
+entrances return the same ags.Sandbox resource and use the same control-plane,
+Metrics, lifecycle, and data-plane implementation.
+
+The default client reads TENCENTCLOUD_REGION, TENCENTCLOUD_SECRET_ID,
+TENCENTCLOUD_SECRET_KEY, and optional TENCENTCLOUD_TOKEN. Its configuration
+and provider binding are cached after the first successful initialization;
+environment variables must not be used to switch accounts in a running process.
+
+CONSTANTS
+
+const (
+	Creating = ags.Creating
+	Running  = ags.Running
+	Pausing  = ags.Pausing
+	Paused   = ags.Paused
+	Resuming = ags.Resuming
+	Stopping = ags.Stopping
+	Stopped  = ags.Stopped
+	Failed   = ags.Failed
+	Unknown  = ags.Unknown
+
+	AuthDefault = ags.SandboxAuthDefault
+	AuthToken   = ags.SandboxAuthToken
+	AuthNone    = ags.SandboxAuthNone
+	AuthPublic  = ags.SandboxAuthPublic
+)
+    Lifecycle and authentication aliases preserve the root package's canonical
+    values.
+
+
+TYPES
+
+type ConnectOptions = ags.ConnectOptions
+    Public aliases keep the shortcut API compact while preserving one canonical
+    resource and model implementation in the root ags package.
+
+type CreateOptions = ags.CreateOptions
+    Public aliases keep the shortcut API compact while preserving one canonical
+    resource and model implementation in the root ags package.
+
+type MountOption = ags.MountOption
+    Public aliases keep the shortcut API compact while preserving one canonical
+    resource and model implementation in the root ags package.
+
+type Sandbox = ags.Sandbox
+    Public aliases keep the shortcut API compact while preserving one canonical
+    resource and model implementation in the root ags package.
+
+func Connect(ctx context.Context, id string, opts ...ConnectOptions) (*Sandbox, error)
+    Connect resumes or conditionally extends an existing Sandbox with the
+    default Client.
+
+func Create(ctx context.Context, opts CreateOptions) (*Sandbox, error)
+    Create creates a Sandbox with the cached environment-backed default Client.
+
+type SandboxAuthMode = ags.SandboxAuthMode
+    Public aliases keep the shortcut API compact while preserving one canonical
+    resource and model implementation in the root ags package.
+
+type SandboxInfo = ags.SandboxInfo
+    Public aliases keep the shortcut API compact while preserving one canonical
+    resource and model implementation in the root ags package.
+
+func Get(ctx context.Context, id string) (SandboxInfo, error)
+    Get reads Sandbox information without resuming, extending, or opening the
+    data plane.
+
+type SandboxListOptions = ags.SandboxListOptions
+    Public aliases keep the shortcut API compact while preserving one canonical
+    resource and model implementation in the root ags package.
+
+type SandboxPage = ags.SandboxPage
+    Public aliases keep the shortcut API compact while preserving one canonical
+    resource and model implementation in the root ags package.
+
+func List(ctx context.Context, opts SandboxListOptions) (SandboxPage, error)
+    List returns one server-filtered Cloud page through the default Client.
+
+type SandboxState = ags.SandboxState
+    Public aliases keep the shortcut API compact while preserving one canonical
+    resource and model implementation in the root ags package.
+
+type ToolRef = ags.ToolRef
+    Public aliases keep the shortcut API compact while preserving one canonical
+    resource and model implementation in the root ags package.
