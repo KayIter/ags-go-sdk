@@ -1,42 +1,44 @@
 # Agent Sandbox Go SDK
 
-面向腾讯云 Agent Sandbox 的 Go 语言 SDK，提供：
-- 沙箱生命周期管理（创建、连接、列出、销毁）
-- 远程代码执行与上下文管理（tool/code）
-- 远程命令/进程管理（tool/command）
-- 远程文件系统操作（tool/filesystem）
+[English](README.md)
 
-## 文档
+这是腾讯云 Agent Sandbox 的 Go SDK。SDK 通过同一个 `Sandbox` 对象提供沙箱生命周期、
+流式文件、命令、PTY、文件监听、代码执行上下文和十项云监控指标。
 
-- 使用示例：[docs/examples.md](docs/examples.md)
-- SDK 参考：[docs/sdk-reference.md](docs/sdk-reference.md)
+当前分支对应下一版 1.0 前 API。从 v0.1.5 或更早版本升级前，请先阅读
+[迁移指南](MIGRATION.md)。
 
-## 目录
+## 使用条件
 
-- **代码沙箱 (sandbox/code)**
-  - [沙箱创建](docs/examples.md#1-创建代码沙箱并获取三大客户端)
-  - [代码执行](docs/examples.md#2-运行代码python-等)
-  - [文件操作](docs/examples.md#3-文件系统操作读写列查删改名建目录)
-  - [终端命令执行](docs/examples.md#4-命令进程管理前台后台输入信号进程列表)
-  - [沙箱管理](docs/examples.md#5-代码沙箱列表和管理)
-- **浏览器沙箱 (sandbox/browser)**
-  - 尚未实现
-- **核心包 (sandbox/core)**
-  - [直接创建](docs/examples.md#核心包-sandboxcore)
-  - [连接现有沙箱](docs/examples.md#核心包-sandboxcore)
-  - [列出沙箱](docs/examples.md#核心包-sandboxcore)
-  - [销毁沙箱](docs/examples.md#核心包-sandboxcore)
+- Go 1.22 或更高版本。
+- 已开通腾讯云 Agent Sandbox。
+- 目标地域中已有可用的 Sandbox Tool。
+- 运行环境可以访问腾讯云 API 和沙箱数据面。
 
 ## 安装
 
-建议使用 go modules 引用：
 ```bash
-go get github.com/TencentCloudAgentRuntime/ags-go-sdk@latest
+go get github.com/TencentCloudAgentRuntime/ags-go-sdk
 ```
+
+## 鉴权
+
+控制面和 Metrics 使用腾讯云凭证：
+
+```bash
+export TENCENTCLOUD_REGION=ap-guangzhou
+export TENCENTCLOUD_SECRET_ID=your-secret-id
+export TENCENTCLOUD_SECRET_KEY=your-secret-key
+# 使用腾讯云临时凭证时设置：
+export TENCENTCLOUD_TOKEN=your-session-token
+```
+
+Create、Connect 或 Resume 完成后，SDK 通过控制面取得沙箱实例访问材料。该材料只在
+SDK 内部使用。公共 API 不接收或返回该材料，也不会把它写入 URL。
 
 ## 快速开始
 
-以下示例演示如何创建沙箱，并使用 Files/Commands/Code 三个工具客户端。
+单一云身份场景可以使用 `sandbox` 包。它读取并缓存上述环境配置：
 
 ```go
 package main
@@ -44,102 +46,111 @@ package main
 import (
 	"context"
 	"log"
-	"os"
+	"time"
 
-	sandboxcode "github.com/TencentCloudAgentRuntime/ags-go-sdk/sandbox/code"
-
-	ags "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ags/v20250920"
-	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
-	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/profile"
+	ags "github.com/TencentCloudAgentRuntime/ags-go-sdk"
+	"github.com/TencentCloudAgentRuntime/ags-go-sdk/sandbox"
 )
 
 func main() {
-	// 1) 初始化 AGS Client（推荐）
-	cred := &common.Credential{
-		SecretId:  os.Getenv("TENCENTCLOUD_SECRET_ID"),
-		SecretKey: os.Getenv("TENCENTCLOUD_SECRET_KEY"),
-	}
-	cpf := profile.NewClientProfile()
-	cpf.HttpProfile.Endpoint = "ags.tencentcloudapi.com"
-	client, err := ags.NewClient(cred, "ap-guangzhou", cpf)
-	if err != nil {
-		log.Fatal(err)
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
 
-	// 2) 创建沙箱并获取工具客户端
-	sb, err := sandboxcode.Create(context.TODO(), "code-interpreter-v1", sandboxcode.WithClient(client))
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer func() { _ = sb.Kill(context.TODO()) }()
-
-	// 3) 使用远程代码执行
-	exec, err := sb.Code.RunCode(context.TODO(), "print('hello')", nil, nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-	// 实时输出（可选）
-	_, _ = sb.Code.RunCode(context.TODO(), "print('hi')", &code.RunCodeConfig{Language: "python"}, &code.OnOutputConfig{
-		OnStdout: func(s string) { log.Print("OUT:", s) },
-		OnStderr: func(s string) { log.Print("ERR:", s) },
+	lifetime := 10 * time.Minute
+	sb, err := sandbox.Create(ctx, sandbox.CreateOptions{
+		Tool:    sandbox.ToolRef{ID: "your-tool-id"},
+		Timeout: &lifetime,
+		Env:     map[string]string{"APP_ENV": "demo"},
 	})
-	log.Printf("stdout=%v results=%d err=%v", exec.Logs.Stdout, len(exec.Results), exec.Error)
-
-	// 4) 基础文件系统操作
-	_, err = sb.Files.MakeDir(context.TODO(), "/home/user/demo", nil)
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer sb.Close() // 只释放本地资源
 
-	log.Println("sandbox:", sb.SandboxId)
+	result, err := sb.Commands().Run(ctx, "sh", ags.CommandOptions{
+		Args: []string{"-lc", "printf 'hello from sandbox'"},
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("exit=%d stdout=%s", result.ExitCode, result.Stdout)
+
+	cleanup, stop := context.WithTimeout(context.Background(), 30*time.Second)
+	defer stop()
+	if err := sb.Delete(cleanup); err != nil {
+		log.Fatal(err)
+	}
 }
 ```
 
-更多示例与进阶用法，请参阅：
-- [docs/examples.md](docs/examples.md)
-- [docs/sdk-reference.md](docs/sdk-reference.md)
+## 显式 Client 与多云身份
 
-## 先决条件
+需要明确传入凭证、地域或传输配置时，使用 `ags.Client`。一个 Client 只绑定一个逻辑
+云身份。同一进程使用多个云账号时，应为每套凭证分别创建 Client。
 
-- 腾讯云账号与 Agent Sandbox 访问权限
-- 可用 Region（示例使用 ap-guangzhou）
-- Go 1.20+（推荐）
+```go
+client, err := ags.NewClient(
+	ags.WithRegion("ap-guangzhou"),
+	ags.WithCredentialProvider(provider),
+)
+if err != nil {
+	return err
+}
 
-## 环境变量配置
+sb, err := client.Sandboxes().Connect(ctx, sandboxID)
+if err != nil {
+	return err
+}
+defer sb.Close()
+```
 
-在使用 SDK 之前，需要设置以下环境变量：
+快捷入口和显式 Client 都返回 `*ags.Sandbox`，并调用同一套控制面、Metrics、生命周期
+和数据面实现。
 
-| 变量名 | 说明 |
-|--------|------|
-| `TENCENTCLOUD_SECRET_ID` | 腾讯云 API 密钥 SecretId |
-| `TENCENTCLOUD_SECRET_KEY` | 腾讯云 API 密钥 SecretKey |
+## 能力
 
-您可以在 [腾讯云控制台 - API 密钥管理](https://console.cloud.tencent.com/cam/capi) 获取 SecretId 和 SecretKey。
+| 范围 | API |
+| --- | --- |
+| 控制面 | `Create`、`Connect`、`Get`、`List`、`Pause`、`Resume`、`WaitFor`、`Update`、`Delete` |
+| 文件 | 流式 `Read`/`Write`、`Stat`、`Exists`、`List`、`MakeDir`、`Move`、`Remove`、`Watch` |
+| 命令 | `Run`、`Start`、`List`、`Connect`、有界输出、输入和信号 |
+| Code | `Run`、受管理 Context、显式外部 Context 引用、有界回调 |
+| PTY | 启动屏障、输入、窗口调整、有界事件流 |
+| Metrics | 十项类型化指标，支持 `Start`、`End`、采样周期和部分成功 |
 
-**Linux/macOS:**
+## 生命周期规则
+
+- `Sandbox.Close()` 只释放本地 reader、流和观察任务，不删除远端实例。
+- `Sandbox.Delete(ctx)` 显式停止远端实例，NotFound 按幂等成功处理。
+- Pause 在提交控制面请求前使当前数据面 generation 失效。Resume 获取新的连接材料。旧
+  reader、handle、watch、PTY、Code execution 和受管理 Context 不会恢复。
+- context 取消只停止本地观察，不能证明远端 mutation 或进程已撤销。
+- SDK 不自动重试 mutation。
+
+Create 和 Resume 接受 30 秒至 24 小时的整秒 Timeout。Update 最低为 300 秒。Connect
+先读取实例状态：PAUSED 使用 Resume 规则，RUNNING 使用 Update 规则。SDK 会原样发送
+合法值；已部署的 Cloud 策略仍可能拒绝 30～299 秒，此时 SDK 返回原始结构化服务错误，
+不会提升参数或自动重试。
+
+## 错误处理
+
+使用 `errors.As` 读取 `*ags.Error`。稳定字段包括 `Code`、`Reason`、`Operation`、
+`RequestID`、`Retryable`、`InstanceID` 和可选 mutation 证据。格式化错误不会输出凭证、
+授权头、实例 ID、Cause 或响应正文。
+
+## 开发
+
 ```bash
-export TENCENTCLOUD_SECRET_ID="your-secret-id"
-export TENCENTCLOUD_SECRET_KEY="your-secret-key"
+make verify
 ```
 
-**Windows (PowerShell):**
-```powershell
-$env:TENCENTCLOUD_SECRET_ID="your-secret-id"
-$env:TENCENTCLOUD_SECRET_KEY="your-secret-key"
-```
+默认测试不会访问云端。真实云测试必须显式启用，具体变量和清理要求见
+[贡献指南](CONTRIBUTING-zh.md)。协议与控制面来源记录在 [`contracts/`](contracts/) 中。
 
-**Windows (CMD):**
-```cmd
-set TENCENTCLOUD_SECRET_ID=your-secret-id
-set TENCENTCLOUD_SECRET_KEY=your-secret-key
-```
+更多示例见 [Cookbook](examples/cookbook/README.md)。安全问题请按
+[安全策略](SECURITY.md) 报告。
 
-## 目录结构
+## 许可证
 
-- `sandbox/core`：沙箱创建/连接/列表/销毁，Core 实例封装基础能力
-- `sandbox/code`：便捷聚合，返回 Files、Commands、Code 三个工具客户端
-- `tool/code`：代码执行与上下文管理
-- `tool/command`：进程/命令管理
-- `tool/filesystem`：文件系统读写、目录操作
-
-
+本项目使用 Apache License 2.0。详见 [LICENSE](LICENSE)、[NOTICE](NOTICE) 和
+[SOURCE_ATTRIBUTION.md](SOURCE_ATTRIBUTION.md)。

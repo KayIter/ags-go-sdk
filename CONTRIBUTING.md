@@ -1,206 +1,97 @@
-# Contributing Guide
+# Contributing
 
-Thank you for your interest in Agent Sandbox Go SDK! We welcome all forms of contributions, including but not limited to:
+[中文](CONTRIBUTING-zh.md)
 
-- Bug reports
-- Feature suggestions
-- Code fixes or new features
-- Documentation improvements
+Thank you for contributing to the Agent Sandbox Go SDK. Bug reports, focused feature proposals,
+tests, documentation, and code changes are welcome.
 
-## Development Environment
+## Before opening a change
 
-### Prerequisites
+- Search existing issues and pull requests.
+- Keep one change focused on one problem.
+- Discuss public API changes before implementation when possible.
+- Do not include credentials, Sandbox instance access material, real resource identifiers,
+  private endpoints, customer data, or Cloud test output.
+- Report suspected vulnerabilities through the process in [SECURITY.md](SECURITY.md).
 
-- Go 1.22+
-- [buf](https://buf.build/) (for proto code generation)
-- Tencent Cloud account with Agent Sandbox access
+## Development environment
 
-### Install Development Tools
+- Go 1.22 or later. CI verifies with Go 1.22 and `GOTOOLCHAIN=local`.
+- Run `make tools` with Go 1.25.4 or newer to install the pinned generators and Gitleaks. These
+  build tools have a higher toolchain requirement than the SDK. Run SDK gates with Go 1.22.12
+  and `GOTOOLCHAIN=local`.
+
+Clone your fork and create a branch from `main`:
 
 ```bash
-# Install buf
-make tools
-```
-
-### Clone Repository
-
-```bash
-git clone github.com/TencentCloudAgentRuntime/ags-go-sdk.git
+git clone https://github.com/YOUR_ACCOUNT/ags-go-sdk.git
 cd ags-go-sdk
+git remote add upstream https://github.com/TencentCloudAgentRuntime/ags-go-sdk.git
+git switch -c feature/short-description upstream/main
 ```
 
-## Development Workflow
+## Make a change
 
-### 1. Create Branch
+- Keep public signatures in SDK-owned types. Generated Cloud, protobuf, and Connect types belong
+  behind internal adapters.
+- Add GoDoc to every exported symbol.
+- Add deterministic offline tests for new behavior, cancellation, bounds, and errors.
+- Copy caller-owned maps, slices, and pointed-to values before asynchronous use.
+- Do not add automatic retries for mutations, commands, uploads, or streams.
+- Update `MIGRATION.md` and `CHANGELOG.md` for public or behavioral changes.
+- Keep English and Chinese documentation aligned.
 
-Please create your feature branch based on `main`:
+Run the complete offline gate:
 
 ```bash
-git checkout -b feature/your-feature-name
-# or
-git checkout -b fix/your-bug-fix
+make verify
 ```
 
-Branch naming conventions:
-- `feature/xxx` - New features
-- `fix/xxx` - Bug fixes
-- `docs/xxx` - Documentation updates
-- `refactor/xxx` - Code refactoring
-- `chore/xxx` - Build/tooling related
+Default tests must not contact Tencent Cloud.
 
-### 2. Write Code
+## Protocol changes
 
-Please follow these guidelines:
+Protocol definitions are copied source with recorded provenance. Before editing them:
 
-- Follow Go official code style, use `gofmt` to format code
-- Add documentation comments for exported functions and types
-- Ensure code passes `go vet` and `golint` checks
-- Write unit tests to cover new code
+1. Confirm the upstream revision and license.
+2. Preserve the modification notice and module package mapping.
+3. Update `contracts/proto.json` hashes.
+4. Run `make generate` and review the generated diff.
+5. Run `make verify-generate` and `make verify`.
 
-### 3. Proto File Modifications
+Never edit files under `pb/` by hand.
 
-If you modify proto files in the `proto/` directory, please run:
+## Optional real Cloud tests
+
+Cloud tests are opt-in and are never part of `go test ./...`. Use a dedicated test account and
+Tool. The minimum environment is:
 
 ```bash
-make gen
+export TENCENTCLOUD_SECRET_ID=your-test-secret-id
+export TENCENTCLOUD_SECRET_KEY=your-test-secret-key
+export AGS_E2E_REGION=ap-guangzhou
+export AGS_E2E_TOOL_ID=your-test-tool-id
+export AGS_E2E_CODE_TOOL_ID=your-code-interpreter-tool-id
+export AGS_E2E=1
 ```
 
-to regenerate Go code.
+Set `TENCENTCLOUD_TOKEN` only for temporary Cloud credentials. Metrics uses the same credentials,
+region, and instance as the other journey tests.
 
-### 4. Run Tests
+Run Cloud tests serially:
 
 ```bash
-cd test
-go test -v ./...
+make test-e2e
 ```
 
-### 5. Commit Code
+Each test must record only its in-memory resource ownership, delete every instance it created
+with an independent cleanup context, and confirm the terminal state. Do not run Cloud tests
+against shared production resources or modify a shared Tool.
 
-Commit messages should follow this format:
+## Pull request
 
-```
-<type>(<scope>): <subject>
+Use a Conventional Commit subject such as `feat(sandbox): add bounded watch stream`. In the pull
+request, describe the user-visible behavior, migration impact, tests run, protocol or dependency
+changes, and any remaining limitation. Do not publish a tag or module version from a pull request.
 
-<body>
-
-<footer>
-```
-
-Types:
-- `feat`: New feature
-- `fix`: Bug fix
-- `docs`: Documentation update
-- `style`: Code formatting (no logic changes)
-- `refactor`: Code refactoring
-- `test`: Test related
-- `chore`: Build/tooling related
-
-Example:
-```
-feat(sandbox): add browser sandbox support
-
-- Implement BrowserSandbox type
-- Add browser operation APIs
-- Add unit tests
-
-Closes #123
-```
-
-### 6. Submit Merge Request
-
-- Ensure all tests pass
-- Ensure code is formatted
-- Fill in clear MR description
-- Link related Issues or TAPD tickets
-
-## Code Standards
-
-### Go Code Style
-
-- Use `gofmt` to format code
-- Follow [Effective Go](https://golang.org/doc/effective_go.html)
-- Follow [Go Code Review Comments](https://github.com/golang/go/wiki/CodeReviewComments)
-
-### Naming Conventions
-
-- Package names: lowercase, short, no underscores
-- Exported identifiers: CamelCase
-- Non-exported identifiers: camelCase
-- Constants: CamelCase
-
-### Error Handling
-
-- Prefer using `errors.New()` or `fmt.Errorf()` to create errors
-- Error messages start with lowercase, no trailing punctuation
-- Use `%w` to wrap errors to preserve error chain
-
-```go
-if err != nil {
-    return fmt.Errorf("failed to create sandbox: %w", err)
-}
-```
-
-### Comment Guidelines
-
-- All exported types, functions, constants must have documentation comments
-- Comments start with the name of the described object
-- Use complete sentences
-
-```go
-// Create creates a new code sandbox with the given template.
-// It returns a Sandbox instance and any error encountered.
-func Create(ctx context.Context, template string, opts ...Option) (*Sandbox, error) {
-    // ...
-}
-```
-
-## Directory Structure
-
-```
-ags-go-sdk/
-├── connection/     # Connection management
-├── constant/       # Constant definitions
-├── docs/           # Documentation
-├── example/        # Usage examples
-├── pb/             # Generated protobuf code
-├── proto/          # Proto definition files
-├── sandbox/        # Sandbox core implementation
-│   ├── code/       # Code sandbox
-│   ├── core/       # Core functionality
-│   └── browser/    # Browser sandbox (to be implemented)
-├── test/           # Test code
-└── tool/           # Tool clients
-    ├── code/       # Code execution
-    ├── command/    # Command execution
-    └── filesystem/ # Filesystem operations
-```
-
-## Reporting Bugs
-
-If you find a bug, please report it through:
-
-1. Create an Issue in the project
-2. Include the following information:
-   - SDK version
-   - Go version
-   - Operating system
-   - Steps to reproduce
-   - Expected behavior
-   - Actual behavior
-   - Related logs or error messages
-
-## Feature Suggestions
-
-If you have feature suggestions, please:
-
-1. Create an Issue in the project
-2. Describe your use case
-3. Explain the expected feature behavior
-
-## Contact
-
-For any questions, please contact the project maintainers.
-
-## License
-
-By submitting code, you agree that your contributions will be licensed under the project license.
+Contributions are licensed under the repository's [Apache-2.0 license](LICENSE).

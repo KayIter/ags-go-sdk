@@ -1,206 +1,91 @@
 # 贡献指南
 
-感谢您对 Agent Sandbox Go SDK 的关注！我们欢迎任何形式的贡献，包括但不限于：
+[English](CONTRIBUTING.md)
 
-- 报告 Bug
-- 提交功能建议
-- 提交代码修复或新功能
-- 改进文档
+本仓库接受缺陷报告、范围明确的功能建议、测试、文档和代码修改。
+
+## 提交修改前
+
+- 先检索已有 Issue 和 Pull Request。
+- 一个修改只解决一个问题。
+- 公共 API 变更应先讨论范围和迁移影响。
+- 不要提交凭证、沙箱实例访问材料、真实资源 ID、私有 Endpoint、客户数据或云测试输出。
+- 安全问题按 [SECURITY.md](SECURITY.md) 的私密渠道报告。
 
 ## 开发环境
 
-### 先决条件
+- Go 1.22 或更高版本。CI 使用 Go 1.22 和 `GOTOOLCHAIN=local` 验证。
+- 使用 Go 1.25.4 或更高版本运行 `make tools`，安装固定版本的生成器和 Gitleaks。这些构建
+  工具要求的 Go 版本高于 SDK；SDK 门禁仍使用 Go 1.22.12 和 `GOTOOLCHAIN=local`。
 
-- Go 1.22+
-- [buf](https://buf.build/) (用于 proto 代码生成)
-- 腾讯云账号与 Agent Sandbox 访问权限
-
-### 安装开发工具
+从上游 `main` 创建分支：
 
 ```bash
-# 安装 buf
-make tools
-```
-
-### 克隆仓库
-
-```bash
-git clone github.com/TencentCloudAgentRuntime/ags-go-sdk.git
+git clone https://github.com/YOUR_ACCOUNT/ags-go-sdk.git
 cd ags-go-sdk
+git remote add upstream https://github.com/TencentCloudAgentRuntime/ags-go-sdk.git
+git switch -c feature/short-description upstream/main
 ```
 
-## 开发流程
+## 修改要求
 
-### 1. 创建分支
+- 公共签名只使用 SDK 自有类型。Cloud 生成类型、protobuf 和 Connect 类型只在内部适配层使用。
+- 为所有导出符号补充 GoDoc。
+- 新行为需要确定性的离线测试，并覆盖取消、上限和错误。
+- 异步使用 map、slice 或指针字段前，先复制调用方数据。
+- 不要为 mutation、命令、上传或流操作增加自动重试。
+- 公共 API 或行为变化需要更新 `MIGRATION.md` 和 `CHANGELOG.md`。
+- 中英文文档需要保持内容一致。
 
-请基于 `main` 分支创建您的功能分支：
+运行完整离线门禁：
 
 ```bash
-git checkout -b feature/your-feature-name
-# 或
-git checkout -b fix/your-bug-fix
+make verify
 ```
 
-分支命名规范：
-- `feature/xxx` - 新功能
-- `fix/xxx` - Bug 修复
-- `docs/xxx` - 文档更新
-- `refactor/xxx` - 代码重构
-- `chore/xxx` - 构建/工具相关
+默认测试不得访问腾讯云。
 
-### 2. 编写代码
+## 协议修改
 
-请遵循以下规范：
+协议文件来自已记录来源。修改前完成以下操作：
 
-- 遵循 Go 官方代码风格，使用 `gofmt` 格式化代码
-- 为公开的函数、类型添加文档注释
-- 确保代码通过 `go vet` 和 `golint` 检查
-- 编写单元测试覆盖新增代码
+1. 确认上游 revision 和许可证。
+2. 保留修改声明和 module package mapping。
+3. 更新 `contracts/proto.json` 中的哈希。
+4. 运行 `make generate` 并审查生成代码 diff。
+5. 运行 `make verify-generate` 和 `make verify`。
 
-### 3. Proto 文件修改
+不要手工修改 `pb/` 下的生成文件。
 
-如果您修改了 `proto/` 目录下的 proto 文件，请运行：
+## 可选真实云测试
+
+真实云测试需要显式启用，不属于 `go test ./...`。请使用专用测试账号和 Tool。最小环境变量为：
 
 ```bash
-make gen
+export TENCENTCLOUD_SECRET_ID=your-test-secret-id
+export TENCENTCLOUD_SECRET_KEY=your-test-secret-key
+export AGS_E2E_REGION=ap-guangzhou
+export AGS_E2E_TOOL_ID=your-test-tool-id
+export AGS_E2E_CODE_TOOL_ID=your-code-interpreter-tool-id
+export AGS_E2E=1
 ```
 
-重新生成 Go 代码。
+仅在使用腾讯云临时凭证时设置 `TENCENTCLOUD_TOKEN`。Metrics 与其他旅程测试共用凭证、
+地域和实例。
 
-### 4. 运行测试
+串行运行云测试：
 
 ```bash
-cd test
-go test -v ./...
+make test-e2e
 ```
 
-### 5. 提交代码
+每个测试只清理自己创建的实例，使用独立 cleanup context，并确认实例进入终态。不要对共享
+生产资源运行测试，也不要修改共享 Tool。
 
-提交信息请遵循以下格式：
+## Pull Request
 
-```
-<type>(<scope>): <subject>
+Commit 标题使用 Conventional Commits，例如 `feat(sandbox): add bounded watch stream`。Pull
+Request 需要说明用户可见行为、迁移影响、已运行测试、协议或依赖变化和剩余限制。不要在
+Pull Request 中发布 tag 或 module 版本。
 
-<body>
-
-<footer>
-```
-
-类型 (type)：
-- `feat`: 新功能
-- `fix`: Bug 修复
-- `docs`: 文档更新
-- `style`: 代码格式调整（不影响代码逻辑）
-- `refactor`: 代码重构
-- `test`: 测试相关
-- `chore`: 构建/工具相关
-
-示例：
-```
-feat(sandbox): 添加浏览器沙箱支持
-
-- 实现 BrowserSandbox 类型
-- 添加浏览器操作相关 API
-- 新增单元测试
-
-Closes #123
-```
-
-### 6. 提交 Merge Request
-
-- 确保所有测试通过
-- 确保代码已格式化
-- 填写清晰的 MR 描述
-- 关联相关的 Issue 或 TAPD 单
-
-## 代码规范
-
-### Go 代码风格
-
-- 使用 `gofmt` 格式化代码
-- 遵循 [Effective Go](https://golang.org/doc/effective_go.html)
-- 遵循 [Go Code Review Comments](https://github.com/golang/go/wiki/CodeReviewComments)
-
-### 命名规范
-
-- 包名：小写，简短，无下划线
-- 导出标识符：使用驼峰命名法（CamelCase）
-- 非导出标识符：使用小驼峰命名法（camelCase）
-- 常量：使用驼峰命名法
-
-### 错误处理
-
-- 优先使用 `errors.New()` 或 `fmt.Errorf()` 创建错误
-- 错误信息以小写开头，不以标点结尾
-- 使用 `%w` 包装错误以保留错误链
-
-```go
-if err != nil {
-    return fmt.Errorf("failed to create sandbox: %w", err)
-}
-```
-
-### 注释规范
-
-- 所有导出的类型、函数、常量必须有文档注释
-- 注释以被描述对象的名称开头
-- 使用完整的句子
-
-```go
-// Create creates a new code sandbox with the given template.
-// It returns a Sandbox instance and any error encountered.
-func Create(ctx context.Context, template string, opts ...Option) (*Sandbox, error) {
-    // ...
-}
-```
-
-## 目录结构
-
-```
-ags-go-sdk/
-├── connection/     # 连接管理
-├── constant/       # 常量定义
-├── docs/           # 文档
-├── example/        # 使用示例
-├── pb/             # 生成的 protobuf 代码
-├── proto/          # proto 定义文件
-├── sandbox/        # 沙箱核心实现
-│   ├── code/       # 代码沙箱
-│   ├── core/       # 核心功能
-│   └── browser/    # 浏览器沙箱（待实现）
-├── test/           # 测试代码
-└── tool/           # 工具客户端
-    ├── code/       # 代码执行
-    ├── command/    # 命令执行
-    └── filesystem/ # 文件系统操作
-```
-
-## 报告 Bug
-
-如果您发现了 Bug，请通过以下方式报告：
-
-1. 在项目中创建 Issue
-2. 包含以下信息：
-   - SDK 版本
-   - Go 版本
-   - 操作系统
-   - 复现步骤
-   - 期望行为
-   - 实际行为
-   - 相关日志或错误信息
-
-## 功能建议
-
-如果您有功能建议，请：
-
-1. 在项目中创建 Issue
-2. 描述您的使用场景
-3. 说明期望的功能行为
-
-## 联系方式
-
-如有任何问题，请联系项目维护者。
-
-## 许可证
-
-通过提交代码，您同意您的贡献将按照项目许可证进行授权。
+贡献内容使用仓库的 [Apache-2.0 许可证](LICENSE)。

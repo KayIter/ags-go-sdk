@@ -1,0 +1,11 @@
+Tencent Cloud Agent Sandbox Go SDK
+Copyright 2026 Tencent. All rights reserved.
+
+This product includes modified filesystem and process protocol definitions derived
+from the E2B Infrastructure project and used under the Apache License, Version 2.0.
+The copies in this repository add an ags-go-sdk Go package mapping and a prominent
+modification notice.
+
+Exact upstream revisions, file hashes, modifications, and generated-code relationships
+are recorded in SOURCE_ATTRIBUTION.md. Third-party runtime dependencies are listed in
+THIRD_PARTY.md and remain subject to their respective licenses.
