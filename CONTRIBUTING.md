@@ -80,6 +80,27 @@ Do not expose low-level data-plane getters or generic request builders from the 
 Add a semantic operation to `internal/dataplane` instead; `make verify` enforces this dependency
 direction.
 
+## Control-plane contract changes
+
+The effective AGS control-plane contract comes from a pinned `ags-cli` revision after its
+`api.patch.json` has been applied. This repository stores only the reviewed SDK Action allowlist
+and its generated request/response object closure.
+
+To check or update it, use a clean checkout at the revision recorded in
+`contracts/controlplane/ags/v20250920/MANIFEST.json`:
+
+```bash
+make check-control-contract CLI_DIR=../ags-cli
+make sync-control-contract CLI_DIR=../ags-cli
+make verify-contracts
+```
+
+Review every Action addition to `contracts/control-plane.json`; synchronization must
+never add newly discovered CLI Actions automatically. Prefer `official_typed`. Use `common_raw`
+only when the effective public API contains the Action but the official Go SDK does not, and list
+it in `raw_actions`. A typed network or service error must never fall back to raw because that can
+submit a mutation twice. Do not edit the generated effective snapshot or its hashes by hand.
+
 ## Protocol changes
 
 Protocol definitions are copied source with recorded provenance. Before editing them:

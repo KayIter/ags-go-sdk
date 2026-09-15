@@ -33,6 +33,9 @@ pre-1.0 versions may include documented source-incompatible changes.
   deployed Cloud policy rejections are preserved.
 - Code recognizes the runtime `end_of_execution` terminator while continuing to reject unknown
   or post-termination events.
+- Control-plane contract verification now uses a reproducible, allowlisted snapshot of the pinned
+  CLI effective API and detects Action, field, object-closure, routing, and source synchronization
+  drift without changing the public SDK API.
 
 ### Removed
 

@@ -6,6 +6,9 @@ type ActionRoute string
 const (
 	// OfficialTyped binds an action directly to the generated Tencent Cloud client method.
 	OfficialTyped ActionRoute = "official_typed"
+	// CommonRaw is reserved for an allowlisted effective-API action that the official SDK has
+	// not generated yet. No action currently uses this route and it is never a failure fallback.
+	CommonRaw ActionRoute = "common_raw"
 )
 
 var actionRoutes = map[string]ActionRoute{

@@ -1,0 +1,1255 @@
+{
+  "actions": {
+    "AcquireSandboxInstanceToken": {
+      "document": "获取访问沙箱工具时所需要使用的访问Token，创建沙箱实例后需调用此接口获取沙箱实例访问Token。\n此Token可用于调用代码沙箱实例执行代码，或浏览器沙箱实例进行浏览器操作等。",
+      "input": "AcquireSandboxInstanceTokenRequest",
+      "name": "获取沙箱实例的访问Token",
+      "output": "AcquireSandboxInstanceTokenResponse",
+      "status": "online"
+    },
+    "DescribeSandboxInstanceList": {
+      "document": "查询沙箱实例列表",
+      "input": "DescribeSandboxInstanceListRequest",
+      "name": "查询沙箱实例列表",
+      "output": "DescribeSandboxInstanceListResponse",
+      "status": "online"
+    },
+    "PauseSandboxInstance": {
+      "document": "暂停沙箱实例",
+      "input": "PauseSandboxInstanceRequest",
+      "name": "暂停沙箱实例",
+      "output": "PauseSandboxInstanceResponse",
+      "status": "online"
+    },
+    "ResumeSandboxInstance": {
+      "document": "恢复沙箱实例",
+      "input": "ResumeSandboxInstanceRequest",
+      "name": "恢复沙箱实例",
+      "output": "ResumeSandboxInstanceResponse",
+      "status": "online"
+    },
+    "StartSandboxInstance": {
+      "document": "启动沙箱实例",
+      "input": "StartSandboxInstanceRequest",
+      "name": "启动沙箱实例",
+      "output": "StartSandboxInstanceResponse",
+      "status": "online"
+    },
+    "StopSandboxInstance": {
+      "document": "停止沙箱实例",
+      "input": "StopSandboxInstanceRequest",
+      "name": "停止沙箱实例",
+      "output": "StopSandboxInstanceResponse",
+      "status": "online"
+    },
+    "UpdateSandboxInstance": {
+      "document": "更新沙箱实例",
+      "input": "UpdateSandboxInstanceRequest",
+      "name": "更新沙箱实例",
+      "output": "UpdateSandboxInstanceResponse",
+      "status": "online"
+    }
+  },
+  "metadata": {
+    "apiVersion": "2025-09-20",
+    "api_brief": "Agent Sandbox 沙箱管理与调用",
+    "serviceNameCN": "Agent 沙箱服务",
+    "serviceShortName": "ags"
+  },
+  "objects": {
+    "AcquireSandboxInstanceTokenRequest": {
+      "document": "AcquireSandboxInstanceToken请求参数结构体",
+      "members": [
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e沙箱实例ID，生成的访问Token将仅可用于访问此沙箱实例\u003c/p\u003e",
+          "example": "a123478903213307971e7bc5793",
+          "member": "string",
+          "name": "InstanceId",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "type": "object"
+    },
+    "AcquireSandboxInstanceTokenResponse": {
+      "document": "AcquireSandboxInstanceToken返回参数结构体",
+      "members": [
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e访问Token\u003c/p\u003e",
+          "example": "sit_1XXJWXVbosp4ZeSSlnZBMs4wsWirZtx3Ixp1Ndz2_gQ",
+          "member": "string",
+          "name": "Token",
+          "output_required": true,
+          "type": "string",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e过期时间\u003c/p\u003e",
+          "example": "2025-09-12T09:00:03.094Z",
+          "member": "string",
+          "name": "ExpiresAt",
+          "output_required": false,
+          "type": "string",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e非管控面（envd）的访问Token\u003c/p\u003e",
+          "example": "f0XXXXX077d7d61862e0f144568bd2c207cbbbbe94eb5ef919f884dc614796ab",
+          "member": "string",
+          "name": "TrafficToken",
+          "output_required": false,
+          "type": "string",
+          "value_allowed_null": false
+        },
+        {
+          "document": "唯一请求 ID，由服务端生成，每次请求都会返回（若请求因其他原因未能抵达服务端，则该次请求不会获得 RequestId）。定位问题时需要提供该次请求的 RequestId。",
+          "member": "string",
+          "name": "RequestId",
+          "type": "string"
+        }
+      ],
+      "type": "object"
+    },
+    "ComputerConfiguration": {
+      "document": "桌面电脑环境类沙箱配置",
+      "members": [
+        {
+          "disabled": false,
+          "document": "\u003cp\u003ewaa沙箱工具配置\u003c/p\u003e",
+          "example": "无",
+          "member": "WAAConfiguration",
+          "name": "WAAConfiguration",
+          "output_required": false,
+          "required": false,
+          "type": "object",
+          "value_allowed_null": false
+        }
+      ],
+      "usage": "both"
+    },
+    "CustomConfiguration": {
+      "document": "沙箱自定义配置",
+      "members": [
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e镜像地址\u003c/p\u003e",
+          "example": "test.tencentcloudcr.com/example/nginx:latest",
+          "member": "string",
+          "name": "Image",
+          "output_required": false,
+          "required": false,
+          "type": "string",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e镜像仓库类型：\u003ccode\u003eenterprise\u003c/code\u003e、\u003ccode\u003epersonal\u003c/code\u003e、\u003ccode\u003ecustom\u003c/code\u003e\u003c/p\u003e\u003cp\u003e枚举值：\u003c/p\u003e\u003cul\u003e\u003cli\u003eenterprise： tcr 企业容器镜像服务\u003c/li\u003e\u003cli\u003epersonal： ccr 个人容器镜像服务\u003c/li\u003e\u003c/ul\u003e",
+          "example": "enterprise",
+          "member": "string",
+          "name": "ImageRegistryType",
+          "output_required": false,
+          "required": false,
+          "type": "string",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e启动命令\u003c/p\u003e",
+          "example": "[\"/bin/bash\", \"-c\"]",
+          "member": "string",
+          "name": "Command",
+          "output_required": false,
+          "required": false,
+          "type": "list",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e启动参数\u003c/p\u003e",
+          "example": "[\"-h\", \"0.0.0.0\", \"-p\", \"8000\"]",
+          "member": "string",
+          "name": "Args",
+          "output_required": false,
+          "required": false,
+          "type": "list",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e环境变量\u003c/p\u003e",
+          "example": "无",
+          "member": "EnvVar",
+          "name": "Env",
+          "output_required": false,
+          "required": false,
+          "type": "list",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e端口配置\u003c/p\u003e",
+          "example": "无",
+          "member": "PortConfiguration",
+          "name": "Ports",
+          "output_required": false,
+          "required": false,
+          "type": "list",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e资源配置\u003c/p\u003e",
+          "example": "无",
+          "member": "ResourceConfiguration",
+          "name": "Resources",
+          "output_required": false,
+          "required": false,
+          "type": "object",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e探针配置\u003c/p\u003e",
+          "example": "无",
+          "member": "ProbeConfiguration",
+          "name": "Probe",
+          "output_required": false,
+          "required": false,
+          "type": "object",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e沙箱 DNS 配置\u003c/p\u003e",
+          "example": "无",
+          "member": "DNSConfig",
+          "name": "DNSConfig",
+          "output_required": false,
+          "required": false,
+          "type": "object",
+          "value_allowed_null": false
+        }
+      ],
+      "usage": "both"
+    },
+    "CustomConfigurationDetail": {
+      "document": "沙箱自定义配置详细信息",
+      "members": [
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e镜像地址\u003c/p\u003e",
+          "example": "test.tencentcloudcr.com/example/nginx:latest",
+          "member": "string",
+          "name": "Image",
+          "output_required": false,
+          "required": false,
+          "type": "string",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e镜像仓库类型：\u003ccode\u003eenterprise\u003c/code\u003e、\u003ccode\u003epersonal\u003c/code\u003e、\u003ccode\u003ecustom\u003c/code\u003e。\u003c/p\u003e\u003cp\u003e枚举值：\u003c/p\u003e\u003cul\u003e\u003cli\u003eenterprise： TCR 企业容器镜像服务\u003c/li\u003e\u003cli\u003epersonal： CCR 个人容器镜像服务\u003c/li\u003e\u003c/ul\u003e",
+          "example": "TCR",
+          "member": "string",
+          "name": "ImageRegistryType",
+          "output_required": false,
+          "required": false,
+          "type": "string",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e镜像 Digest\u003c/p\u003e",
+          "example": "sha256:abc123def456...",
+          "member": "string",
+          "name": "ImageDigest",
+          "output_required": false,
+          "required": false,
+          "type": "string",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e启动命令\u003c/p\u003e",
+          "example": "[\"/bin/bash\", \"-c\"]",
+          "member": "string",
+          "name": "Command",
+          "output_required": false,
+          "required": false,
+          "type": "list",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e启动参数\u003c/p\u003e",
+          "example": "[\"-h\", \"0.0.0.0\", \"-p\", \"8000\"]",
+          "member": "string",
+          "name": "Args",
+          "output_required": false,
+          "required": false,
+          "type": "list",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e环境变量\u003c/p\u003e",
+          "example": "无",
+          "member": "EnvVar",
+          "name": "Env",
+          "output_required": false,
+          "required": false,
+          "type": "list",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e端口配置\u003c/p\u003e",
+          "example": "无",
+          "member": "PortConfiguration",
+          "name": "Ports",
+          "output_required": false,
+          "required": false,
+          "type": "list",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e资源配置\u003c/p\u003e",
+          "example": "无",
+          "member": "ResourceConfiguration",
+          "name": "Resources",
+          "output_required": false,
+          "required": false,
+          "type": "object",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e探针配置\u003c/p\u003e",
+          "example": "无",
+          "member": "ProbeConfiguration",
+          "name": "Probe",
+          "output_required": false,
+          "required": false,
+          "type": "object",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e沙箱 DNS 配置\u003c/p\u003e",
+          "example": "无",
+          "member": "DNSConfig",
+          "name": "DNSConfig",
+          "output_required": false,
+          "required": false,
+          "type": "object",
+          "value_allowed_null": false
+        }
+      ],
+      "usage": "both"
+    },
+    "DNSConfig": {
+      "document": "沙箱自定义 dns 配置",
+      "members": [
+        {
+          "disabled": false,
+          "document": "\u003cp\u003eDNS 服务器地址\u003c/p\u003e\u003cp\u003e参数格式：需要有效 IP 地址\u003c/p\u003e\u003cp\u003e默认值：10.0.0.1\u003c/p\u003e",
+          "example": "[\"9.9.9.9\"]",
+          "member": "string",
+          "name": "Servers",
+          "output_required": false,
+          "required": true,
+          "type": "list",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e搜索域(对应 resolv.conf 的 search 指令)\u003c/p\u003e",
+          "example": "[\"example.internal\"]",
+          "member": "string",
+          "name": "Searches",
+          "output_required": false,
+          "required": false,
+          "type": "list",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e配置项(对应  resolv.conf 选项)\u003c/p\u003e",
+          "example": "[\"ndots:5\"]",
+          "member": "string",
+          "name": "Options",
+          "output_required": false,
+          "required": false,
+          "type": "list",
+          "value_allowed_null": false
+        }
+      ],
+      "usage": "both"
+    },
+    "DescribeSandboxInstanceListRequest": {
+      "document": "DescribeSandboxInstanceList请求参数结构体",
+      "members": [
+        {
+          "disabled": false,
+          "document": "沙箱实例ID列表，指定要查询的实例。如果为空则查询所有实例。最大支持100个ID",
+          "example": "[\"c8f390ac57ce454db5cefff77fc8174a\"]",
+          "member": "string",
+          "name": "InstanceIds",
+          "required": false,
+          "type": "list"
+        },
+        {
+          "disabled": false,
+          "document": "沙箱工具ID，指定时查询该沙箱模板下的实例，为空则查询所有沙箱模板的实例",
+          "example": "sdt-ee4ywozw",
+          "member": "string",
+          "name": "ToolId",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "disabled": false,
+          "document": "偏移量，默认为0",
+          "example": "10",
+          "member": "int64",
+          "name": "Offset",
+          "required": false,
+          "type": "int"
+        },
+        {
+          "disabled": false,
+          "document": "返回数量，默认为20，最大值为100",
+          "example": "20",
+          "member": "int64",
+          "name": "Limit",
+          "required": false,
+          "type": "int"
+        },
+        {
+          "disabled": false,
+          "document": "过滤条件",
+          "example": "无",
+          "member": "Filter",
+          "name": "Filters",
+          "required": false,
+          "type": "list"
+        }
+      ],
+      "type": "object"
+    },
+    "DescribeSandboxInstanceListResponse": {
+      "document": "DescribeSandboxInstanceList返回参数结构体",
+      "members": [
+        {
+          "disabled": false,
+          "document": "沙箱实例列表",
+          "example": "无",
+          "member": "SandboxInstance",
+          "name": "InstanceSet",
+          "output_required": true,
+          "type": "list",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "符合条件的实例总数",
+          "example": "100",
+          "member": "int64",
+          "name": "TotalCount",
+          "output_required": true,
+          "type": "int",
+          "value_allowed_null": false
+        },
+        {
+          "document": "唯一请求 ID，由服务端生成，每次请求都会返回（若请求因其他原因未能抵达服务端，则该次请求不会获得 RequestId）。定位问题时需要提供该次请求的 RequestId。",
+          "member": "string",
+          "name": "RequestId",
+          "type": "string"
+        }
+      ],
+      "type": "object"
+    },
+    "EnvVar": {
+      "document": "环境变量",
+      "members": [
+        {
+          "disabled": false,
+          "document": "环境变量名",
+          "example": "TEST_ENV",
+          "member": "string",
+          "name": "Name",
+          "output_required": false,
+          "required": false,
+          "type": "string",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "环境变量值",
+          "example": "ABD",
+          "member": "string",
+          "name": "Value",
+          "output_required": false,
+          "required": false,
+          "type": "string",
+          "value_allowed_null": false
+        }
+      ],
+      "usage": "both"
+    },
+    "Filter": {
+      "document": "过滤列表规则",
+      "members": [
+        {
+          "disabled": false,
+          "document": "属性名称, 若存在多个Filter时，Filter间的关系为逻辑与（AND）关系。",
+          "example": "FILTER_KEY_NAME",
+          "member": "string",
+          "name": "Name",
+          "output_required": false,
+          "required": false,
+          "type": "string",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "属性值, 若同一个Filter存在多个Values，同一Filter下Values间的关系为逻辑或（OR）关系。",
+          "example": "[\"LocalDev\"]",
+          "member": "string",
+          "name": "Values",
+          "output_required": false,
+          "required": false,
+          "type": "list",
+          "value_allowed_null": false
+        }
+      ],
+      "usage": "both"
+    },
+    "HttpGetAction": {
+      "document": "HTTP GET 探测动作配置",
+      "members": [
+        {
+          "disabled": false,
+          "document": "路径",
+          "example": "/health",
+          "member": "string",
+          "name": "Path",
+          "output_required": false,
+          "required": false,
+          "type": "string",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "端口",
+          "example": "8000",
+          "member": "int64",
+          "name": "Port",
+          "output_required": false,
+          "required": false,
+          "type": "int",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "协议",
+          "example": "HTTP",
+          "member": "string",
+          "name": "Scheme",
+          "output_required": false,
+          "required": false,
+          "type": "string",
+          "value_allowed_null": false
+        }
+      ],
+      "usage": "both"
+    },
+    "MetadataVar": {
+      "document": "metadata 项",
+      "members": [
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e沙箱元数据名\u003c/p\u003e",
+          "example": "b",
+          "member": "string",
+          "name": "Name",
+          "output_required": false,
+          "required": false,
+          "type": "string",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e沙箱元数据值\u003c/p\u003e",
+          "example": "b",
+          "member": "string",
+          "name": "Value",
+          "output_required": false,
+          "required": false,
+          "type": "string",
+          "value_allowed_null": false
+        }
+      ],
+      "usage": "both"
+    },
+    "MountOption": {
+      "document": "沙箱实例存储挂载配置可选项，用于覆盖沙箱工具的存储配置的部分选项，并提供子路径挂载配置。",
+      "members": [
+        {
+          "disabled": false,
+          "document": "指定沙箱工具中的存储配置名称",
+          "example": "Storage1",
+          "member": "string",
+          "name": "Name",
+          "output_required": false,
+          "required": false,
+          "type": "string",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "沙箱实例本地挂载路径（可选），默认继承工具中的存储配置",
+          "example": "/home/user",
+          "member": "string",
+          "name": "MountPath",
+          "output_required": false,
+          "required": false,
+          "type": "string",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "沙箱实例存储挂载子路径（可选）",
+          "example": "workspace1",
+          "member": "string",
+          "name": "SubPath",
+          "output_required": false,
+          "required": false,
+          "type": "string",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "沙箱实例存储挂载读写权限（可选），默认继承工具存储配置",
+          "example": "false",
+          "member": "bool",
+          "name": "ReadOnly",
+          "output_required": false,
+          "required": false,
+          "type": "bool",
+          "value_allowed_null": false
+        }
+      ],
+      "usage": "both"
+    },
+    "PauseSandboxInstanceRequest": {
+      "document": "PauseSandboxInstance请求参数结构体",
+      "members": [
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e沙箱实例ID\u003c/p\u003e",
+          "example": "4729e19d67fb4ba38854dbbfc63c72e9",
+          "member": "string",
+          "name": "InstanceId",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e可选。带内存暂停，恢复后保留进程和内存状态。true=带内存；false=仅磁盘；不传=系统默认（当前默认 true，带内存）。\u003c/p\u003e",
+          "example": "true",
+          "member": "bool",
+          "name": "Memory",
+          "required": false,
+          "type": "bool"
+        }
+      ],
+      "type": "object"
+    },
+    "PauseSandboxInstanceResponse": {
+      "document": "PauseSandboxInstance返回参数结构体",
+      "members": [
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e目标沙箱实例当前的状态\u003c/p\u003e\u003cp\u003e枚举值：\u003c/p\u003e\u003cul\u003e\u003cli\u003ePAUSING： 正在暂停中\u003c/li\u003e\u003cli\u003ePAUSED： 已暂停\u003c/li\u003e\u003cli\u003ePAUSE_FAILED： 暂停失败\u003c/li\u003e\u003c/ul\u003e",
+          "example": "PAUSED",
+          "member": "string",
+          "name": "InstanceStatus",
+          "output_required": false,
+          "type": "string",
+          "value_allowed_null": false
+        },
+        {
+          "document": "唯一请求 ID，由服务端生成，每次请求都会返回（若请求因其他原因未能抵达服务端，则该次请求不会获得 RequestId）。定位问题时需要提供该次请求的 RequestId。",
+          "member": "string",
+          "name": "RequestId",
+          "type": "string"
+        }
+      ],
+      "type": "object"
+    },
+    "PortConfiguration": {
+      "document": "端口配置",
+      "members": [
+        {
+          "disabled": false,
+          "document": "端口名",
+          "example": "http",
+          "member": "string",
+          "name": "Name",
+          "output_required": false,
+          "required": false,
+          "type": "string",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "端口",
+          "example": "8000",
+          "member": "int64",
+          "name": "Port",
+          "output_required": false,
+          "required": false,
+          "type": "int",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "协议",
+          "example": "TCP",
+          "member": "string",
+          "name": "Protocol",
+          "output_required": false,
+          "required": false,
+          "type": "string",
+          "value_allowed_null": false
+        }
+      ],
+      "usage": "both"
+    },
+    "ProbeConfiguration": {
+      "document": "健康检查探针配置",
+      "members": [
+        {
+          "disabled": false,
+          "document": "HTTP GET 探测配置",
+          "example": "无",
+          "member": "HttpGetAction",
+          "name": "HttpGet",
+          "output_required": false,
+          "required": false,
+          "type": "object",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "健康检查就绪超时",
+          "example": "30000",
+          "member": "int64",
+          "name": "ReadyTimeoutMs",
+          "output_required": false,
+          "required": false,
+          "type": "int",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "健康检查单次探测超时",
+          "example": "1000",
+          "member": "int64",
+          "name": "ProbeTimeoutMs",
+          "output_required": false,
+          "required": false,
+          "type": "int",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "健康检查间隔",
+          "example": "1000",
+          "member": "int64",
+          "name": "ProbePeriodMs",
+          "output_required": false,
+          "required": false,
+          "type": "int",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "健康检查成功阈值",
+          "example": "1",
+          "member": "int64",
+          "name": "SuccessThreshold",
+          "output_required": false,
+          "required": false,
+          "type": "int",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "健康检查失败阈值",
+          "example": "3",
+          "member": "int64",
+          "name": "FailureThreshold",
+          "output_required": false,
+          "required": false,
+          "type": "int",
+          "value_allowed_null": false
+        }
+      ],
+      "usage": "both"
+    },
+    "ResourceConfiguration": {
+      "document": "资源配置",
+      "members": [
+        {
+          "disabled": false,
+          "document": "\u003cp\u003ecpu 资源量\u003c/p\u003e",
+          "example": "500m",
+          "member": "string",
+          "name": "CPU",
+          "output_required": false,
+          "required": false,
+          "type": "string",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e内存资源量\u003c/p\u003e",
+          "example": "1Gi",
+          "member": "string",
+          "name": "Memory",
+          "output_required": false,
+          "required": false,
+          "type": "string",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e自定义磁盘大小\u003c/p\u003e\u003cp\u003e枚举值：\u003c/p\u003e\u003cul\u003e\u003cli\u003e1Gi： 1Gi\u003c/li\u003e\u003cli\u003e5Gi： 5Gi\u003c/li\u003e\u003cli\u003e10Gi： 10Gi\u003c/li\u003e\u003cli\u003e20Gi： 20Gi\u003c/li\u003e\u003c/ul\u003e\n注意：此字段可能返回 null，表示取不到有效值。",
+          "example": "10Gi",
+          "member": "string",
+          "name": "Storage",
+          "output_required": false,
+          "required": false,
+          "type": "string",
+          "value_allowed_null": true
+        }
+      ],
+      "usage": "both"
+    },
+    "ResumeSandboxInstanceRequest": {
+      "document": "ResumeSandboxInstance请求参数结构体",
+      "members": [
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e沙箱实例ID\u003c/p\u003e",
+          "example": "4729e19d67fb4ba38854dbbfc63c72e9",
+          "member": "string",
+          "name": "InstanceId",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e超时时间，超过这个时间就自动回收实例。支持格式：5m、300s、1h 等，默认 5m。最小 30s，最大 24h\u003c/p\u003e",
+          "example": "5m",
+          "member": "string",
+          "name": "Timeout",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "type": "object"
+    },
+    "ResumeSandboxInstanceResponse": {
+      "document": "ResumeSandboxInstance返回参数结构体",
+      "members": [
+        {
+          "document": "唯一请求 ID，由服务端生成，每次请求都会返回（若请求因其他原因未能抵达服务端，则该次请求不会获得 RequestId）。定位问题时需要提供该次请求的 RequestId。",
+          "member": "string",
+          "name": "RequestId",
+          "type": "string"
+        }
+      ],
+      "type": "object"
+    },
+    "SandboxInstance": {
+      "document": "沙箱实例结构体",
+      "members": [
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e沙箱实例唯一标识符\u003c/p\u003e",
+          "example": "48dd1132cfb96ccee5fd0aa58da2562d2fe3a929",
+          "member": "string",
+          "name": "InstanceId",
+          "output_required": true,
+          "required": true,
+          "type": "string",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e所属沙箱工具 ID\u003c/p\u003e",
+          "example": "sdt-def456ghi789",
+          "member": "string",
+          "name": "ToolId",
+          "output_required": true,
+          "required": true,
+          "type": "string",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e所属沙箱工具名称\u003c/p\u003e",
+          "example": "code-interpreter-v1",
+          "member": "string",
+          "name": "ToolName",
+          "output_required": true,
+          "required": true,
+          "type": "string",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e实例状态：STARTING（启动中）、RUNNING（运行中）、STOPPING（停止中）、STOPPED（已停止）、STOP_FAILED（停止失败）、FAILED（失败状态）\u003c/p\u003e",
+          "example": "RUNNING",
+          "member": "string",
+          "name": "Status",
+          "output_required": true,
+          "required": true,
+          "type": "string",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e是否常驻实例\u003c/p\u003e",
+          "example": "false",
+          "member": "bool",
+          "name": "Persistent",
+          "output_required": false,
+          "required": false,
+          "type": "bool",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e超时时间（秒），null 表示无超时设置\u003c/p\u003e",
+          "example": "600",
+          "member": "uint64",
+          "name": "TimeoutSeconds",
+          "output_required": false,
+          "required": false,
+          "type": "int",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e过期时间（ISO 8601 格式），null 表示无过期时间\u003c/p\u003e",
+          "example": "2024-01-01T10:30:00Z",
+          "member": "string",
+          "name": "ExpiresAt",
+          "output_required": false,
+          "required": false,
+          "type": "string",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e停止原因：manual（手动）、timeout（超时）、error（错误）、system（系统），仅在状态为 STOPPED、STOP_FAILED 或 FAILED 时有值。当 provider 停止失败时，状态为 STOP_FAILED，原因为 error\u003c/p\u003e",
+          "example": "timeout",
+          "member": "string",
+          "name": "StopReason",
+          "output_required": false,
+          "required": false,
+          "type": "string",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e创建时间（ISO 8601 格式）\u003c/p\u003e",
+          "example": "2024-01-01T10:00:00Z",
+          "member": "string",
+          "name": "CreateTime",
+          "output_required": false,
+          "required": false,
+          "type": "string",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e更新时间（ISO 8601 格式）\u003c/p\u003e",
+          "example": "2024-01-01T10:10:00Z",
+          "member": "string",
+          "name": "UpdateTime",
+          "output_required": false,
+          "required": false,
+          "type": "string",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e存储挂载选项\u003c/p\u003e",
+          "example": "无",
+          "member": "MountOption",
+          "name": "MountOptions",
+          "output_required": false,
+          "required": false,
+          "type": "list",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e沙箱实例自定义配置\u003c/p\u003e",
+          "example": "无",
+          "member": "CustomConfigurationDetail",
+          "name": "CustomConfiguration",
+          "output_required": false,
+          "required": false,
+          "type": "object",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e桌面电脑环境类沙箱配置\u003c/p\u003e",
+          "example": "无",
+          "member": "ComputerConfiguration",
+          "name": "ComputerConfiguration",
+          "output_required": false,
+          "required": false,
+          "type": "object",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e网络模式\u003c/p\u003e\u003cp\u003e枚举值：\u003c/p\u003e\u003cul\u003e\u003cli\u003ePUBLIC： 公网访问\u003c/li\u003e\u003cli\u003eSANDBOX： 无网络\u003c/li\u003e\u003cli\u003eINTERNAL_SERVICE： 腾讯云内部公共服务\u003c/li\u003e\u003c/ul\u003e\u003cp\u003e可以覆盖工具级别的网络配置。但如果一个工具本身就不支持 VPC 网络，那么即便在实例设置里选了 VPC 模式，也是无效的\u003c/p\u003e",
+          "example": "VPC",
+          "member": "string",
+          "name": "NetworkMode",
+          "output_required": false,
+          "required": false,
+          "type": "string",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e沙箱实例元数据\u003c/p\u003e",
+          "example": "无",
+          "member": "MetadataVar",
+          "name": "Metadata",
+          "output_required": false,
+          "required": false,
+          "type": "list",
+          "value_allowed_null": false
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e沙箱访问认证模式\u003c/p\u003e\u003cp\u003e枚举值：\u003c/p\u003e\u003cul\u003e\u003cli\u003eDEFAULT： 默认，即 TOKEN 认证\u003c/li\u003e\u003cli\u003eTOKEN： Token认证，即所有端口访问都需携带TOKEN\u003c/li\u003e\u003cli\u003eNONE： 免认证，即所有端口访问无需携带TOKEN\u003c/li\u003e\u003cli\u003ePUBLIC： 公开模式，即ENVD管理端口（49983）访问需携带TOKEN，其他端口无需携带TOKEN\u003c/li\u003e\u003c/ul\u003e\u003cp\u003e默认值：DEFAULT\u003c/p\u003e",
+          "example": "TOKEN",
+          "member": "string",
+          "name": "AuthMode",
+          "output_required": false,
+          "required": false,
+          "type": "string",
+          "value_allowed_null": false
+        }
+      ],
+      "usage": "both"
+    },
+    "StartSandboxInstanceRequest": {
+      "document": "StartSandboxInstance请求参数结构体",
+      "members": [
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e沙箱工具 ID，与 ToolName 至少有一个要填\u003c/p\u003e",
+          "example": "sdt-ee4ywozw",
+          "member": "string",
+          "name": "ToolId",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e沙箱工具名称，与 ToolId 至少有一个要填\u003c/p\u003e",
+          "example": "my-browser-sandbox",
+          "member": "string",
+          "name": "ToolName",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e超时时间，超过这个时间就自动回收实例。支持格式：5m、300s、1h 等，默认 5m。最小 30s，最大 24h\u003c/p\u003e",
+          "example": "10m",
+          "member": "string",
+          "name": "Timeout",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e幂等性 Token，长度不超过 64 字符\u003c/p\u003e",
+          "example": "instance-token-456",
+          "member": "string",
+          "name": "ClientToken",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e沙箱实例存储挂载配置\u003c/p\u003e",
+          "example": "无",
+          "member": "MountOption",
+          "name": "MountOptions",
+          "required": false,
+          "type": "list"
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e沙箱实例自定义配置\u003c/p\u003e",
+          "example": "无",
+          "member": "CustomConfiguration",
+          "name": "CustomConfiguration",
+          "required": false,
+          "type": "object"
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e沙箱访问认证模式\u003c/p\u003e\u003cp\u003e枚举值：\u003c/p\u003e\u003cul\u003e\u003cli\u003eDEFAULT： 默认，即TOKEN认证\u003c/li\u003e\u003cli\u003eTOKEN： Token认证，即所有端口访问都需携带Token\u003c/li\u003e\u003cli\u003eNONE： 免认证，即所有端口访问无需携带Token\u003c/li\u003e\u003cli\u003ePUBLIC： 公开模式，即ENVD管理端口（49983）访问需携带Token，其他端口无需携带Token\u003c/li\u003e\u003c/ul\u003e\u003cp\u003e默认值：DEFAULT\u003c/p\u003e",
+          "example": "DEFAULT",
+          "member": "string",
+          "name": "AuthMode",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e沙箱元数据\u003c/p\u003e",
+          "example": "无",
+          "member": "MetadataVar",
+          "name": "Metadata",
+          "required": false,
+          "type": "list"
+        }
+      ],
+      "type": "object"
+    },
+    "StartSandboxInstanceResponse": {
+      "document": "StartSandboxInstance返回参数结构体",
+      "members": [
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e创建的沙箱实例完整信息\u003c/p\u003e",
+          "example": "无",
+          "member": "SandboxInstance",
+          "name": "Instance",
+          "output_required": true,
+          "type": "object",
+          "value_allowed_null": false
+        },
+        {
+          "document": "唯一请求 ID，由服务端生成，每次请求都会返回（若请求因其他原因未能抵达服务端，则该次请求不会获得 RequestId）。定位问题时需要提供该次请求的 RequestId。",
+          "member": "string",
+          "name": "RequestId",
+          "type": "string"
+        }
+      ],
+      "type": "object"
+    },
+    "StopSandboxInstanceRequest": {
+      "document": "StopSandboxInstance请求参数结构体",
+      "members": [
+        {
+          "disabled": false,
+          "document": "沙箱实例ID",
+          "example": "12345678123412341234123456789abc",
+          "member": "string",
+          "name": "InstanceId",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "type": "object"
+    },
+    "StopSandboxInstanceResponse": {
+      "document": "StopSandboxInstance返回参数结构体",
+      "members": [
+        {
+          "document": "唯一请求 ID，由服务端生成，每次请求都会返回（若请求因其他原因未能抵达服务端，则该次请求不会获得 RequestId）。定位问题时需要提供该次请求的 RequestId。",
+          "member": "string",
+          "name": "RequestId",
+          "type": "string"
+        }
+      ],
+      "type": "object"
+    },
+    "UpdateSandboxInstanceRequest": {
+      "document": "UpdateSandboxInstance请求参数结构体",
+      "members": [
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e沙箱实例ID\u003c/p\u003e",
+          "example": "953e15d3655e4daab120b885c908edf7",
+          "member": "string",
+          "name": "InstanceId",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e新的超时时间（从设置时开始重新计算超时），支持格式：5m、300s、1h等。最小30s，最大24h。如果不指定则保持原有超时设置\u003c/p\u003e",
+          "example": "1h",
+          "member": "string",
+          "name": "Timeout",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e沙箱实例元数据\u003c/p\u003e",
+          "example": "无",
+          "member": "MetadataVar",
+          "name": "Metadata",
+          "required": false,
+          "type": "list"
+        }
+      ],
+      "type": "object"
+    },
+    "UpdateSandboxInstanceResponse": {
+      "document": "UpdateSandboxInstance返回参数结构体",
+      "members": [
+        {
+          "document": "唯一请求 ID，由服务端生成，每次请求都会返回（若请求因其他原因未能抵达服务端，则该次请求不会获得 RequestId）。定位问题时需要提供该次请求的 RequestId。",
+          "member": "string",
+          "name": "RequestId",
+          "type": "string"
+        }
+      ],
+      "type": "object"
+    },
+    "WAAConfiguration": {
+      "document": "waa自定义配置项",
+      "members": [
+        {
+          "disabled": false,
+          "document": "\u003cp\u003e自定义waa镜像ID\u003c/p\u003e",
+          "example": "img-p******a",
+          "member": "string",
+          "name": "ImageId",
+          "output_required": false,
+          "required": false,
+          "type": "string",
+          "value_allowed_null": false
+        }
+      ],
+      "usage": "both"
+    }
+  },
+  "version": "1.0"
+}

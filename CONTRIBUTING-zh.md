@@ -72,6 +72,26 @@ make verify
 不要从私有 Client 暴露底层 getter 或泛型请求构造器。应在 `internal/dataplane` 增加语义操作；
 `make verify` 会检查该依赖方向。
 
+## 控制面契约修改
+
+AGS 控制面的 effective API 来自固定 revision 的 `ags-cli`，并已应用其中的
+`api.patch.json`。本仓库只保存经过评审的 SDK Action 白名单，以及生成的请求/响应对象传递
+闭包。
+
+准备与 manifest 记录相同 revision 的干净 CLI checkout，然后检查或更新：
+
+```bash
+make check-control-contract CLI_DIR=../ags-cli
+make sync-control-contract CLI_DIR=../ags-cli
+make verify-contracts
+```
+
+`contracts/control-plane.json` 每增加一个 Action 都必须人工评审；同步命令不得
+把 CLI 新发现的 Action 自动加入 SDK。优先使用 `official_typed`。只有 effective API 已包含、
+官方 Go SDK 尚未生成的 Action 才能选择 `common_raw`，并同时列入 `raw_actions`。typed 请求
+发生网络或服务错误后不得 fallback raw，否则 mutation 可能重复提交。不要手工修改生成的
+effective snapshot 或 hash。
+
 ## 协议修改
 
 协议文件来自已记录来源。修改前完成以下操作：

@@ -16,6 +16,7 @@ func TestSharedControlPlaneUsesFrozenActionsAndFields(t *testing.T) {
 	var mu sync.Mutex
 	state := "RUNNING"
 	var startBody map[string]any
+	seen := map[string]bool{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") == "" {
 			t.Error("missing TC3 authorization")
@@ -30,6 +31,7 @@ func TestSharedControlPlaneUsesFrozenActionsAndFields(t *testing.T) {
 		response := map[string]any{"RequestId": "request-test"}
 		mu.Lock()
 		defer mu.Unlock()
+		seen[action] = true
 		switch action {
 		case "StartSandboxInstance":
 			startBody = input
@@ -46,9 +48,13 @@ func TestSharedControlPlaneUsesFrozenActionsAndFields(t *testing.T) {
 			state = "RUNNING"
 		case "StopSandboxInstance":
 			state = "STOPPED"
+		case "AcquireSandboxInstanceToken":
+			response["Token"] = "instance-token"
+		case "UpdateSandboxInstance":
 		default:
 			t.Errorf("unexpected action %q", action)
 		}
+		checkFrozenControlResponse(t, action, response)
 		_ = json.NewEncoder(w).Encode(map[string]any{"Response": response})
 	}))
 	defer server.Close()
@@ -75,30 +81,108 @@ func TestSharedControlPlaneUsesFrozenActionsAndFields(t *testing.T) {
 	if err != nil || page.TotalCount != 1 || page.Items[0].Metadata["job"] != "e2e" {
 		t.Fatalf("page=%+v err=%v", page, err)
 	}
+	updateTimeout := 5 * time.Minute
+	if err = cp.Update(context.Background(), "sb-test", UpdateOptions{Timeout: &updateTimeout}); err != nil {
+		t.Fatal(err)
+	}
+	generation, err := cp.service.Runtime(context.Background(), "sb-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = generation.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if err = cp.Delete(context.Background(), "sb-test"); err != nil {
 		t.Fatal(err)
 	}
+	mu.Lock()
+	if len(seen) != 7 {
+		t.Errorf("captured %d control-plane actions, want all 7: %v", len(seen), seen)
+	}
+	mu.Unlock()
 }
 
 func checkFrozenControlRequest(t *testing.T, action string, input map[string]any) {
 	t.Helper()
-	allowed := map[string]map[string]bool{
-		"StartSandboxInstance":        {"ToolName": true, "Timeout": true, "ClientToken": true, "Metadata": true},
-		"DescribeSandboxInstanceList": {"Filters": true, "InstanceIds": true, "Limit": true, "Offset": true},
-		"PauseSandboxInstance":        {"InstanceId": true, "Memory": true},
-		"ResumeSandboxInstance":       {"InstanceId": true, "Timeout": true},
-		"StopSandboxInstance":         {"InstanceId": true},
-	}
-	fields, ok := allowed[action]
+	contract := readControlPlaneContract(t)
+	actionShape, ok := contract.Actions[action]
 	if !ok {
 		t.Errorf("action %q is outside the SDK control-plane allowlist", action)
 		return
 	}
+	shape, ok := contract.Objects[actionShape.Input]
+	if !ok {
+		t.Errorf("action %q input object %q is missing", action, actionShape.Input)
+		return
+	}
+	fields := map[string]controlPlaneMember{}
+	for _, member := range shape.Members {
+		fields[member.Name] = member
+	}
 	for key := range input {
-		if !fields[key] {
+		if _, allowed := fields[key]; !allowed {
 			t.Errorf("unexpected %s request field %q", action, key)
 		}
 	}
+	for name, member := range fields {
+		if member.Required {
+			if _, present := input[name]; !present {
+				t.Errorf("required %s request field %q is missing", action, name)
+			}
+		}
+	}
+}
+
+func checkFrozenControlResponse(t *testing.T, action string, output map[string]any) {
+	t.Helper()
+	contract := readControlPlaneContract(t)
+	actionShape, ok := contract.Actions[action]
+	if !ok {
+		t.Errorf("action %q is outside the SDK control-plane allowlist", action)
+		return
+	}
+	shape, ok := contract.Objects[actionShape.Output]
+	if !ok {
+		t.Errorf("action %q output object %q is missing", action, actionShape.Output)
+		return
+	}
+	fields := map[string]controlPlaneMember{}
+	for _, member := range shape.Members {
+		fields[member.Name] = member
+	}
+	for key := range output {
+		if _, allowed := fields[key]; !allowed {
+			t.Errorf("unexpected %s response field %q", action, key)
+		}
+	}
+	for name, member := range fields {
+		if member.OutputRequired {
+			if _, present := output[name]; !present {
+				t.Errorf("required %s response field %q is missing", action, name)
+			}
+		}
+	}
+}
+
+type controlPlaneContract struct {
+	Actions map[string]struct {
+		Input  string `json:"input"`
+		Output string `json:"output"`
+	} `json:"actions"`
+	Objects map[string]struct {
+		Members []controlPlaneMember `json:"members"`
+	} `json:"objects"`
+}
+
+type controlPlaneMember struct {
+	Name           string `json:"name"`
+	Required       bool   `json:"required"`
+	OutputRequired bool   `json:"output_required"`
+}
+
+func readControlPlaneContract(t *testing.T) controlPlaneContract {
+	t.Helper()
+	return readContract[controlPlaneContract](t, "contracts/controlplane/ags/v20250920/effective.json")
 }
 
 func instanceJSON(state string) map[string]any {

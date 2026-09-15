@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source_repository": "https://github.com/TencentCloudAgentRuntime/ags-cli",
+  "source_revision": "faf0164263075bf957722c70d42ad48b2946ec16",
+  "source_path": "api/ags/v20250920",
+  "source_schema_sha256": "0c91b8941f58e3f0b3379877b970b08229a630b32ddf77ae8134033284dcf3f5",
+  "source_patch_sha256": "cef06a6d180f950924f14907ac3563d181aefb602308397a9aa661c138cde554",
+  "source_effective_sha256": "31c02e358aa7b9fa22cb0f7e2e2b2a639d0692163da390d397ec51a20c056a6f",
+  "sdk_effective_sha256": "982e546ecfe44c839baa576b39c7453485fb7a1dc94633e6bab065b546a6904d",
+  "sdk_effective_actions": 7,
+  "sdk_effective_objects": 28
+}

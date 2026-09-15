@@ -1,23 +1,14 @@
 {
-  "schema_version": 1,
-  "source": {
-    "repository": "https://github.com/TencentCloudAgentRuntime/ags-cli",
-    "revision": "faf0164263075bf957722c70d42ad48b2946ec16",
-    "path": "api/ags/v20250920",
-    "source_schema_sha256": "0c91b8941f58e3f0b3379877b970b08229a630b32ddf77ae8134033284dcf3f5",
-    "patch_sha256": "cef06a6d180f950924f14907ac3563d181aefb602308397a9aa661c138cde554",
-    "effective_sha256": "d90aa50e412082545cf391fc0552f334c0a773961cab32bd81132451906b149f",
-    "effective_actions": 35,
-    "effective_objects": 110
-  },
-  "ags_sdk_version": "v1.3.173",
+  "service": "ags",
+  "version": "20250920",
   "actions": [
-    {"name": "StartSandboxInstance", "route": "official_typed", "mutation": true},
-    {"name": "DescribeSandboxInstanceList", "route": "official_typed", "mutation": false},
-    {"name": "AcquireSandboxInstanceToken", "route": "official_typed", "mutation": false},
-    {"name": "PauseSandboxInstance", "route": "official_typed", "mutation": true},
-    {"name": "ResumeSandboxInstance", "route": "official_typed", "mutation": true},
-    {"name": "StopSandboxInstance", "route": "official_typed", "mutation": true},
-    {"name": "UpdateSandboxInstance", "route": "official_typed", "mutation": true}
-  ]
+    {"name": "AcquireSandboxInstanceToken", "route": "official_typed"},
+    {"name": "DescribeSandboxInstanceList", "route": "official_typed"},
+    {"name": "PauseSandboxInstance", "route": "official_typed"},
+    {"name": "ResumeSandboxInstance", "route": "official_typed"},
+    {"name": "StartSandboxInstance", "route": "official_typed"},
+    {"name": "StopSandboxInstance", "route": "official_typed"},
+    {"name": "UpdateSandboxInstance", "route": "official_typed"}
+  ],
+  "raw_actions": []
 }
