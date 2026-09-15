@@ -4,9 +4,6 @@ import (
 	"context"
 	"errors"
 	"strings"
-
-	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/dataplane"
-	fs "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/filesystem"
 )
 
 // StatOptions selects the remote identity for a metadata query.
@@ -117,50 +114,43 @@ func (f *Files) Remove(ctx context.Context, path string, opts RemoveOptions) err
 	return p.Remove(ctx, path, string(opts.User))
 }
 
-func checkedFileInfo(entry *fs.EntryInfo, op string) (FileInfo, error) {
-	if entry == nil {
-		return FileInfo{}, codeError(Protocol, op, "ENTRY_INFO_MISSING")
-	}
-	return mapProtoFileInfo(entry), nil
-}
 func (d *runtimeDataPlane) Stat(ctx context.Context, path, user string) (result FileInfo, err error) {
 	const op = "Files.Stat"
 	ctx, finish, _ := d.requestOperation(ctx, op)
 	defer finish()
 	defer func() { err = operationError(ctx, op, err) }()
-	r, err := d.wire.Filesystem().Stat(ctx, dataplane.Request(d.wire, &fs.StatRequest{Path: path}, user))
+	info, err := d.wire.StatFile(ctx, path, user)
 	if err != nil {
 		return FileInfo{}, err
 	}
-	return checkedFileInfo(r.Msg.Entry, op)
+	return mapDataPlaneFileInfo(info), nil
 }
 func (d *runtimeDataPlane) MakeDir(ctx context.Context, path, user string) (result FileInfo, err error) {
 	const op = "Files.MakeDir"
 	ctx, finish, _ := d.requestOperation(ctx, op)
 	defer finish()
 	defer func() { err = operationError(ctx, op, err) }()
-	r, err := d.wire.Filesystem().MakeDir(ctx, dataplane.Request(d.wire, &fs.MakeDirRequest{Path: path}, user))
+	info, err := d.wire.MakeDir(ctx, path, user)
 	if err != nil {
 		return FileInfo{}, err
 	}
-	return checkedFileInfo(r.Msg.Entry, op)
+	return mapDataPlaneFileInfo(info), nil
 }
 func (d *runtimeDataPlane) Move(ctx context.Context, source, destination, user string) (result FileInfo, err error) {
 	const op = "Files.Move"
 	ctx, finish, _ := d.requestOperation(ctx, op)
 	defer finish()
 	defer func() { err = operationError(ctx, op, err) }()
-	r, err := d.wire.Filesystem().Move(ctx, dataplane.Request(d.wire, &fs.MoveRequest{Source: source, Destination: destination}, user))
+	info, err := d.wire.MoveFile(ctx, source, destination, user)
 	if err != nil {
 		return FileInfo{}, err
 	}
-	return checkedFileInfo(r.Msg.Entry, op)
+	return mapDataPlaneFileInfo(info), nil
 }
 func (d *runtimeDataPlane) Remove(ctx context.Context, path, user string) (err error) {
 	const op = "Files.Remove"
 	ctx, finish, _ := d.requestOperation(ctx, op)
 	defer finish()
 	defer func() { err = operationError(ctx, op, err) }()
-	_, err = d.wire.Filesystem().Remove(ctx, dataplane.Request(d.wire, &fs.RemoveRequest{Path: path}, user))
-	return err
+	return d.wire.RemoveFile(ctx, path, user)
 }

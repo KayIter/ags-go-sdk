@@ -13,6 +13,18 @@ import (
 	"time"
 )
 
+type testCreateCodeContextRequest struct {
+	Language string `json:"language"`
+	CWD      string `json:"cwd"`
+}
+
+type testRunCodeRequest struct {
+	Code      string            `json:"code"`
+	ContextID string            `json:"context_id"`
+	Language  string            `json:"language"`
+	Env       map[string]string `json:"env_vars"`
+}
+
 func codeFixture(t *testing.T, handler http.Handler) (*Sandbox, *httptest.Server) {
 	t.Helper()
 	server := httptest.NewServer(handler)
@@ -34,13 +46,13 @@ func TestCodeManagedContextRequestAndAggregation(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch request.URL.Path {
 		case "/contexts":
-			var input createCodeContextRequest
+			var input testCreateCodeContextRequest
 			if err := json.NewDecoder(request.Body).Decode(&input); err != nil || input.Language != "python" || input.CWD != "/workspace" {
 				t.Errorf("unexpected context input: %+v err=%v", input, err)
 			}
 			_, _ = fmt.Fprint(w, `{"id":"context-1","language":"python","cwd":"/workspace"}`)
 		case "/execute":
-			var input runCodeRequest
+			var input testRunCodeRequest
 			if err := json.NewDecoder(request.Body).Decode(&input); err != nil || input.ContextID != "context-1" || input.Language != "" || input.Env["FOO"] != "bar" {
 				t.Errorf("unexpected run input: %+v err=%v", input, err)
 			}
@@ -139,7 +151,10 @@ func TestCodeContextOwnerGenerationAndBusyRejectBeforeHTTP(t *testing.T) {
 }
 
 func TestCodeExternalContextAndStrictProtocol(t *testing.T) {
-	var input runCodeRequest
+	var input struct {
+		ContextID string `json:"context_id"`
+		Language  string `json:"language"`
+	}
 	sandbox, _ := codeFixture(t, http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		_ = json.NewDecoder(request.Body).Decode(&input)
 		w.Header().Set("Content-Type", "application/json")

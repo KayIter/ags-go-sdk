@@ -10,10 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"connectrpc.com/connect"
 	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/dataplane"
-	fsproto "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/filesystem"
-	processproto "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/process"
 )
 
 func (d *runtimeDataPlane) Watch(ctx context.Context, root string, opts WatchOptions) (out watchStream, err error) {
@@ -26,7 +23,7 @@ func (d *runtimeDataPlane) Watch(ctx context.Context, root string, opts WatchOpt
 			err = normalizeError("Files.Watch", err)
 		}
 	}()
-	stream, err := d.wire.Filesystem().WatchDir(streamCtx, dataplane.Request(d.wire, &fsproto.WatchDirRequest{Path: root, Recursive: opts.Recursive}, string(opts.User)))
+	stream, err := d.wire.StartWatch(streamCtx, root, opts.Recursive, opts.IncludeEntry, string(opts.User))
 	if err != nil {
 		cancel()
 		return nil, err
@@ -36,24 +33,14 @@ func (d *runtimeDataPlane) Watch(ctx context.Context, root string, opts WatchOpt
 		cancel()
 		return nil, err
 	}
-	watch := &runtimeWatchStream{ctx: streamCtx, cancel: cancel, root: root, watchID: hex.EncodeToString(random), opts: opts, stream: stream, wire: d.wire}
+	watch := &runtimeWatchStream{ctx: streamCtx, cancel: cancel, root: root, watchID: hex.EncodeToString(random), opts: opts, stream: stream}
 	watch.release = func() { d.unregister(watch) }
-	for stream.Receive() {
-		msg := stream.Msg()
-		if msg != nil && msg.GetStart() != nil {
-			if err := d.register(watch); err != nil {
-				_ = watch.invalidate()
-				return nil, err
-			}
-			started()
-			return watch, nil
-		}
-	}
-	cancel()
-	if err := stream.Err(); err != nil {
+	if err := d.register(watch); err != nil {
+		_ = watch.invalidate()
 		return nil, err
 	}
-	return nil, codeError(Protocol, "Files.Watch", "START_EVENT_MISSING")
+	started()
+	return watch, nil
 }
 
 type runtimeWatchStream struct {
@@ -62,8 +49,7 @@ type runtimeWatchStream struct {
 	root     string
 	watchID  string
 	opts     WatchOptions
-	stream   *connect.ServerStreamForClient[fsproto.WatchDirResponse]
-	wire     *dataplane.Client
+	stream   *dataplane.WatchStream
 	sequence uint64
 	once     sync.Once
 	paused   atomic.Bool
@@ -71,69 +57,65 @@ type runtimeWatchStream struct {
 }
 
 func (w *runtimeWatchStream) Recv() (FileEvent, error) {
-	for w.stream.Receive() {
-		msg := w.stream.Msg()
-		if msg == nil || msg.GetKeepalive() != nil || msg.GetStart() != nil {
-			continue
-		}
-		event := msg.GetFilesystem()
-		if event == nil {
-			continue
+	for {
+		event, err := w.stream.Recv(w.ctx)
+		if err != nil {
+			defer w.closeStream(false)
+			if err == io.EOF {
+				return FileEvent{}, io.EOF
+			}
+			if w.paused.Load() {
+				return FileEvent{}, codeError(InstancePaused, "Files.Watch", "INSTANCE_PAUSED")
+			}
+			return FileEvent{}, operationError(w.ctx, "Files.Watch", err)
 		}
 		w.sequence++
-		name := event.GetName()
+		name := event.Name
 		eventPath := name
 		if !path.IsAbs(name) {
 			eventPath = path.Join(w.root, name)
 		}
-		out := FileEvent{WatchID: w.watchID, Type: fileEventType(event.GetType()), Path: eventPath, Sequence: w.sequence}
-		if w.opts.IncludeEntry && out.Type != FileRemove {
-			info, err := w.wire.Filesystem().Stat(w.ctx, dataplane.Request(w.wire, &fsproto.StatRequest{Path: eventPath}, string(w.opts.User)))
-			if err == nil && info != nil && info.Msg.GetEntry() != nil {
-				mapped := mapProtoFileInfo(info.Msg.GetEntry())
-				out.Entry = &mapped
-			}
+		out := FileEvent{WatchID: w.watchID, Type: fileEventType(event.Type), Path: eventPath, Sequence: w.sequence}
+		if event.Entry != nil {
+			mapped := mapDataPlaneFileInfo(*event.Entry)
+			out.Entry = &mapped
 		}
 		return out, nil
 	}
-	defer w.closeStream()
-	if err := w.stream.Err(); err != nil {
-		if w.paused.Load() {
-			return FileEvent{}, codeError(InstancePaused, "Files.Watch", "INSTANCE_PAUSED")
-		}
-		return FileEvent{}, operationError(w.ctx, "Files.Watch", err)
-	}
-	return FileEvent{}, io.EOF
 }
 func (w *runtimeWatchStream) Close() error {
-	return w.closeStream()
+	return w.closeStream(false)
 }
 func (w *runtimeWatchStream) invalidate() error {
 	w.paused.Store(true)
-	return w.closeStream()
+	return w.closeStream(true)
 }
-func (w *runtimeWatchStream) closeStream() error {
+func (w *runtimeWatchStream) closeStream(invalidate bool) error {
 	var err error
 	w.once.Do(func() {
 		w.cancel()
-		err = w.stream.Close()
+		if invalidate {
+			err = w.stream.Invalidate()
+		} else {
+			err = w.stream.Close()
+		}
 		if w.release != nil {
 			w.release()
 		}
 	})
 	return err
 }
-func fileEventType(v fsproto.EventType) FileEventType {
+func fileEventType(v dataplane.WatchEventType) FileEventType {
 	switch v {
-	case fsproto.EventType_EVENT_TYPE_CREATE:
+	case dataplane.WatchCreate:
 		return FileCreate
-	case fsproto.EventType_EVENT_TYPE_WRITE:
+	case dataplane.WatchWrite:
 		return FileWrite
-	case fsproto.EventType_EVENT_TYPE_REMOVE:
+	case dataplane.WatchRemove:
 		return FileRemove
-	case fsproto.EventType_EVENT_TYPE_RENAME:
+	case dataplane.WatchRename:
 		return FileRename
-	case fsproto.EventType_EVENT_TYPE_CHMOD:
+	case dataplane.WatchChmod:
 		return FileChmod
 	default:
 		return FileEventType("UNKNOWN")
@@ -150,35 +132,17 @@ func (d *runtimeDataPlane) OpenPTY(ctx context.Context, opts PTYOptions) (out pt
 			err = normalizeError("PTY.Open", err)
 		}
 	}()
-	client := d.wire.Process()
-	process := &processproto.ProcessConfig{Cmd: opts.Command, Args: opts.Args, Envs: opts.Env}
-	if opts.Cwd != "" {
-		process.Cwd = &opts.Cwd
-	}
-	req := dataplane.Request(d.wire, &processproto.StartRequest{Process: process, Pty: &processproto.PTY{Size: &processproto.PTY_Size{Cols: opts.Cols, Rows: opts.Rows}}}, string(opts.User))
-	stream, err := client.Start(streamCtx, req)
+	stream, err := d.wire.StartPTY(streamCtx, dataplane.PTYConfig{Command: opts.Command, Args: opts.Args, Env: opts.Env, CWD: opts.Cwd, Size: dataplane.PTYSize{Cols: opts.Cols, Rows: opts.Rows}}, string(opts.User))
 	if err != nil {
 		cancel()
 		return nil, err
-	}
-	if !stream.Receive() {
-		cancel()
-		if err := stream.Err(); err != nil {
-			return nil, err
-		}
-		return nil, codeError(Protocol, "PTY.Open", "START_EVENT_MISSING")
-	}
-	start := stream.Msg().GetEvent().GetStart()
-	if start == nil {
-		cancel()
-		return nil, codeError(Protocol, "PTY.Open", "START_EVENT_MISSING")
 	}
 	random := make([]byte, 16)
 	if _, err := rand.Read(random); err != nil {
 		cancel()
 		return nil, err
 	}
-	pty := &runtimePTYStream{ctx: streamCtx, cancel: cancel, wire: d.wire, user: dataplane.NormalizeUser(string(opts.User)), stream: stream, pid: start.GetPid(), sessionID: hex.EncodeToString(random), startPending: true}
+	pty := &runtimePTYStream{ctx: streamCtx, cancel: cancel, wire: d.wire, user: string(opts.User), stream: stream, pid: stream.PID, sessionID: hex.EncodeToString(random), startPending: true}
 	pty.release = func() { d.unregister(pty) }
 	if err := d.register(pty); err != nil {
 		_ = pty.invalidate()
@@ -193,7 +157,7 @@ type runtimePTYStream struct {
 	cancel       context.CancelFunc
 	wire         *dataplane.Client
 	user         string
-	stream       *connect.ServerStreamForClient[processproto.StartResponse]
+	stream       *dataplane.ProcessStream
 	pid          uint32
 	sessionID    string
 	mu           sync.Mutex
@@ -205,9 +169,6 @@ type runtimePTYStream struct {
 	release      func()
 }
 
-func (p *runtimePTYStream) selector() *processproto.ProcessSelector {
-	return &processproto.ProcessSelector{Selector: &processproto.ProcessSelector_Pid{Pid: p.pid}}
-}
 func (p *runtimePTYStream) Recv() (PTYEvent, error) {
 	p.mu.Lock()
 	if p.startPending {
@@ -217,18 +178,24 @@ func (p *runtimePTYStream) Recv() (PTYEvent, error) {
 		return out, nil
 	}
 	p.mu.Unlock()
-	for p.stream.Receive() {
-		msg := p.stream.Msg()
-		if msg == nil || msg.Event == nil {
-			continue
+	for {
+		event, err := p.stream.Recv()
+		if err != nil {
+			if err == io.EOF {
+				return PTYEvent{}, io.EOF
+			}
+			if p.paused.Load() {
+				return PTYEvent{}, codeError(InstancePaused, "PTY.Events", "INSTANCE_PAUSED")
+			}
+			return PTYEvent{}, operationError(p.ctx, "PTY.Events", err)
 		}
-		if data := msg.Event.GetData(); data != nil {
-			if out := data.GetPty(); len(out) > 0 {
-				return PTYEvent{Type: PTYOutput, Data: out}, nil
+		if event.Kind == dataplane.ProcessPTY {
+			if len(event.Data) > 0 {
+				return PTYEvent{Type: PTYOutput, Data: event.Data}, nil
 			}
 			continue
 		}
-		if end := msg.Event.GetEnd(); end != nil {
+		if event.Kind == dataplane.ProcessEnd {
 			p.mu.Lock()
 			p.ended = true
 			idle := p.active == 0
@@ -236,20 +203,10 @@ func (p *runtimePTYStream) Recv() (PTYEvent, error) {
 			if idle {
 				_ = p.Close()
 			}
-			exit := &ExitStatus{Code: int(end.GetExitCode()), Exited: end.GetExited(), Reason: ExitReason(end.GetStatus())}
-			if end.Error != nil {
-				exit.Message = end.GetError()
-			}
+			exit := &ExitStatus{Code: event.Exit.Code, Exited: event.Exit.Exited, Reason: ExitReason(event.Exit.Status), Message: event.Exit.Message}
 			return PTYEvent{Type: PTYEnd, Exit: exit}, nil
 		}
 	}
-	if err := p.stream.Err(); err != nil {
-		if p.paused.Load() {
-			return PTYEvent{}, codeError(InstancePaused, "PTY.Events", "INSTANCE_PAUSED")
-		}
-		return PTYEvent{}, operationError(p.ctx, "PTY.Events", err)
-	}
-	return PTYEvent{}, io.EOF
 }
 func (p *runtimePTYStream) ID() string { return p.sessionID }
 func (p *runtimePTYStream) Input(ctx context.Context, data []byte) error {
@@ -258,7 +215,7 @@ func (p *runtimePTYStream) Input(ctx context.Context, data []byte) error {
 		return err
 	}
 	defer finish()
-	_, err = p.wire.Process().SendInput(ctx, dataplane.Request(p.wire, &processproto.SendInputRequest{Process: p.selector(), Input: &processproto.ProcessInput{Input: &processproto.ProcessInput_Pty{Pty: data}}}, p.user))
+	err = p.wire.SendPTYInput(ctx, p.pid, data, p.user)
 	return operationError(ctx, "PTY.Write", err)
 }
 func (p *runtimePTYStream) Resize(ctx context.Context, cols, rows uint32) error {
@@ -267,7 +224,7 @@ func (p *runtimePTYStream) Resize(ctx context.Context, cols, rows uint32) error 
 		return err
 	}
 	defer finish()
-	_, err = p.wire.Process().Update(ctx, dataplane.Request(p.wire, &processproto.UpdateRequest{Process: p.selector(), Pty: &processproto.PTY{Size: &processproto.PTY_Size{Cols: cols, Rows: rows}}}, p.user))
+	err = p.wire.ResizePTY(ctx, p.pid, dataplane.PTYSize{Cols: cols, Rows: rows}, p.user)
 	return operationError(ctx, "PTY.Resize", err)
 }
 func (p *runtimePTYStream) operation(ctx context.Context, op string) (context.Context, func(), error) {
@@ -309,10 +266,7 @@ func (p *runtimePTYStream) Close() error {
 		if !p.ended {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			_, result = p.wire.Process().SendSignal(ctx, dataplane.Request(p.wire,
-				&processproto.SendSignalRequest{Process: p.selector(), Signal: processproto.Signal_SIGNAL_SIGTERM},
-				p.user,
-			))
+			result = p.wire.SendProcessSignal(ctx, p.pid, dataplane.SignalTERM, p.user)
 		}
 		p.ended = true
 		p.mu.Unlock()
@@ -337,7 +291,7 @@ func (p *runtimePTYStream) invalidate() error {
 		p.ended = true
 		p.mu.Unlock()
 		p.cancel()
-		result = p.stream.Close()
+		result = p.stream.Invalidate()
 	})
 	return result
 }

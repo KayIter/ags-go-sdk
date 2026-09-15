@@ -1,15 +1,13 @@
 package ags
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
 	"io"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/dataplane"
 )
 
 const (
@@ -189,24 +187,6 @@ type CodeExecution struct {
 	CallbackError *Error
 }
 
-type createCodeContextRequest struct {
-	Language string `json:"language,omitempty"`
-	CWD      string `json:"cwd,omitempty"`
-}
-
-type createCodeContextResponse struct {
-	ID       string `json:"id"`
-	Language string `json:"language"`
-	CWD      string `json:"cwd"`
-}
-
-type runCodeRequest struct {
-	Code      string            `json:"code"`
-	ContextID string            `json:"context_id,omitempty"`
-	Language  string            `json:"language,omitempty"`
-	Env       map[string]string `json:"env_vars,omitempty"`
-}
-
 // CreateContext creates a managed context bound to the current Sandbox generation.
 func (c *Code) CreateContext(ctx context.Context, opts CreateCodeContextOptions) (*CodeContext, error) {
 	if opts.Language == "" {
@@ -222,29 +202,9 @@ func (c *Code) CreateContext(ctx context.Context, opts CreateCodeContextOptions)
 	if err != nil {
 		return nil, err
 	}
-	payload, err := json.Marshal(createCodeContextRequest{Language: opts.Language, CWD: opts.CWD})
-	if err != nil {
-		return nil, normalizeError("Code.CreateContext", err)
-	}
-	body, err := transport.codeRequest(ctx, "Code.CreateContext", "/contexts", payload)
+	response, err := transport.createCodeContext(ctx, opts.Language, opts.CWD, DefaultMaxCodeEventBytes)
 	if err != nil {
 		return nil, err
-	}
-	defer body.Close()
-	limited := io.LimitReader(body, DefaultMaxCodeEventBytes+1)
-	data, err := io.ReadAll(limited)
-	if err != nil {
-		return nil, normalizeError("Code.CreateContext", err)
-	}
-	if len(data) > DefaultMaxCodeEventBytes {
-		return nil, codeError(ResourceExhausted, "Code.CreateContext", "CODE_CONTEXT_RESPONSE_TOO_LARGE")
-	}
-	var response createCodeContextResponse
-	if err = json.Unmarshal(data, &response); err != nil {
-		return nil, codeError(Protocol, "Code.CreateContext", "CODE_CONTEXT_RESPONSE_INVALID")
-	}
-	if response.ID == "" {
-		return nil, codeError(Protocol, "Code.CreateContext", "CODE_CONTEXT_ID_MISSING")
 	}
 	return &CodeContext{id: response.ID, language: response.Language, cwd: response.CWD, owner: c, generation: plane}, nil
 }
@@ -273,19 +233,15 @@ func (c *Code) Run(ctx context.Context, source string, opts RunCodeOptions, call
 	}
 	defer release()
 	env := cloneStringMap(opts.Env)
-	payload, err := json.Marshal(runCodeRequest{Code: source, ContextID: contextID, Language: opts.Language, Env: env})
-	if err != nil {
-		return nil, normalizeError("Code.Run", err)
-	}
-	body, err := transport.codeRequest(ctx, "Code.Run", "/execute", payload)
+	stream, err := transport.startCode(ctx, dataplane.CodeRequest{Source: source, ContextID: contextID, Language: opts.Language, Env: env}, opts.MaxEventBytes)
 	if err != nil {
 		return nil, err
 	}
-	defer body.Close()
+	defer stream.Close()
 	execution := &CodeExecution{}
 	observer := newCodeObserver(callbacks, opts.CallbackTimeout)
 	defer func() { execution.CallbackError = observer.finish() }()
-	if err = consumeCodeEvents(body, execution, opts, observer); err != nil {
+	if err = consumeCodeEvents(stream, execution, opts, observer); err != nil {
 		return nil, err
 	}
 	return execution, nil
@@ -374,97 +330,58 @@ func validateRunCodeOptions(opts RunCodeOptions) error {
 	return nil
 }
 
-func consumeCodeEvents(body io.Reader, out *CodeExecution, opts RunCodeOptions, observer *codeObserver) error {
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 64<<10), opts.MaxEventBytes)
+func consumeCodeEvents(stream codeEventStream, out *CodeExecution, opts RunCodeOptions, observer *codeObserver) error {
 	var stdoutBytes, stderrBytes, resultBytes int64
 	eventCount := 0
-	ended := false
-	for scanner.Scan() {
-		line := append([]byte(nil), scanner.Bytes()...)
-		var envelope struct {
-			Type string `json:"type"`
-		}
-		if err := json.Unmarshal(line, &envelope); err != nil {
-			return &Error{Code: Protocol, Operation: "Code.Run", Reason: "CODE_EVENT_INVALID", Cause: err}
-		}
-		if envelope.Type == "" {
-			return codeError(Protocol, "Code.Run", "CODE_EVENT_TYPE_MISSING")
-		}
-		if ended {
-			return codeError(Protocol, "Code.Run", "CODE_EVENT_AFTER_END")
+	for {
+		event, err := stream.Recv()
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
 		}
 		eventCount++
 		if eventCount > opts.MaxEvents {
 			out.EventsTruncated = true
 		}
-		switch envelope.Type {
-		case "keepalive":
-		case "end_of_execution":
-			ended = true
-		case "stdout", "stderr":
-			var event struct {
-				Text *string `json:"text"`
-			}
-			if err := json.Unmarshal(line, &event); err != nil || event.Text == nil {
-				return codeError(Protocol, "Code.Run", "CODE_LOG_EVENT_INVALID")
-			}
-			retained, truncated := retainCodeText(*event.Text, opts.MaxOutputBytes, map[bool]*int64{true: &stdoutBytes, false: &stderrBytes}[envelope.Type == "stdout"])
-			if envelope.Type == "stdout" {
+		switch event.Kind {
+		case dataplane.CodeKeepalive, dataplane.CodeEnd:
+		case dataplane.CodeStdout, dataplane.CodeStderr:
+			retained, truncated := retainCodeText(event.Text, opts.MaxOutputBytes, map[bool]*int64{true: &stdoutBytes, false: &stderrBytes}[event.Kind == dataplane.CodeStdout])
+			if event.Kind == dataplane.CodeStdout {
 				out.StdoutTruncated = out.StdoutTruncated || truncated || eventCount > opts.MaxEvents
 				if eventCount <= opts.MaxEvents && retained != "" {
 					out.Stdout = append(out.Stdout, retained)
 				}
-				observer.enqueue(codeCallbackEvent{kind: "stdout", text: *event.Text, size: len(line)})
+				observer.enqueue(codeCallbackEvent{kind: "stdout", text: event.Text, size: event.WireBytes})
 			} else {
 				out.StderrTruncated = out.StderrTruncated || truncated || eventCount > opts.MaxEvents
 				if eventCount <= opts.MaxEvents && retained != "" {
 					out.Stderr = append(out.Stderr, retained)
 				}
-				observer.enqueue(codeCallbackEvent{kind: "stderr", text: *event.Text, size: len(line)})
+				observer.enqueue(codeCallbackEvent{kind: "stderr", text: event.Text, size: event.WireBytes})
 			}
-		case "result":
-			var result CodeResult
-			if err := json.Unmarshal(line, &result); err != nil {
-				return codeError(Protocol, "Code.Run", "CODE_RESULT_INVALID")
-			}
-			if eventCount > opts.MaxEvents || resultBytes+int64(len(line)) > opts.MaxResultBytes {
+		case dataplane.CodeResultEvent:
+			result := mapCodeResult(event.Result)
+			if eventCount > opts.MaxEvents || resultBytes+int64(event.WireBytes) > opts.MaxResultBytes {
 				out.ResultsTruncated = true
 			} else {
-				resultBytes += int64(len(line))
+				resultBytes += int64(event.WireBytes)
 				out.Results = append(out.Results, result)
 			}
-			observer.enqueue(codeCallbackEvent{kind: "result", result: result, size: len(line)})
-		case "error":
-			var event struct {
-				Name      string `json:"name"`
-				Value     string `json:"value"`
-				Traceback string `json:"traceback"`
-			}
-			if err := json.Unmarshal(line, &event); err != nil {
-				return codeError(Protocol, "Code.Run", "CODE_ERROR_EVENT_INVALID")
-			}
-			out.Error = &CodeExecutionError{Name: event.Name, Value: event.Value, Traceback: event.Traceback}
-		case "number_of_executions":
-			var event struct {
-				ExecutionCount *int `json:"execution_count"`
-			}
-			if err := json.Unmarshal(line, &event); err != nil || event.ExecutionCount == nil {
-				return codeError(Protocol, "Code.Run", "CODE_EXECUTION_COUNT_INVALID")
-			}
+			observer.enqueue(codeCallbackEvent{kind: "result", result: result, size: event.WireBytes})
+		case dataplane.CodeErrorEvent:
+			out.Error = &CodeExecutionError{Name: event.ExecutionError.Name, Value: event.ExecutionError.Value, Traceback: event.ExecutionError.Traceback}
+		case dataplane.CodeExecutionCount:
 			count := *event.ExecutionCount
 			out.ExecutionCount = &count
-		default:
-			return &Error{Code: Protocol, Operation: "Code.Run", Reason: "CODE_EVENT_UNKNOWN", Cause: fmt.Errorf("unknown Code event type %q", envelope.Type)}
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		if errors.Is(err, bufio.ErrTooLong) || strings.Contains(err.Error(), "token too long") {
-			return codeError(ResourceExhausted, "Code.Run", "CODE_EVENT_TOO_LARGE")
-		}
-		return normalizeError("Code.Run", err)
-	}
-	return nil
+}
+
+func mapCodeResult(value dataplane.CodeResult) CodeResult {
+	return CodeResult{Text: value.Text, HTML: value.HTML, Markdown: value.Markdown, SVG: value.SVG, PNG: value.PNG, JPEG: value.JPEG, PDF: value.PDF, Latex: value.Latex, JavaScript: value.JavaScript, JSON: value.JSON, Data: value.Data, Chart: value.Chart, Extra: value.Extra, IsMainResult: value.IsMainResult}
 }
 
 func retainCodeText(value string, limit int64, used *int64) (string, bool) {

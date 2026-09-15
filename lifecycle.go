@@ -6,11 +6,10 @@ import (
 	"errors"
 	"io"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
-	"connectrpc.com/connect"
+	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/dataplane"
 )
 
 func (d *runtimeDataPlane) unregister(handle interface{ invalidate() error }) {
@@ -83,30 +82,71 @@ func normalizeError(op string, err error) error {
 	case errors.Is(err, context.DeadlineExceeded):
 		code = DeadlineExceeded
 	default:
-		var rpc *connect.Error
+		var wire *dataplane.WireError
 		var timeout net.Error
 		var syntax *json.SyntaxError
 		var shape *json.UnmarshalTypeError
-		if errors.As(err, &rpc) {
-			code = ErrorCode(strings.ToUpper(rpc.Code().String()))
-			switch rpc.Code() {
-			case connect.CodeUnknown, connect.CodeInternal:
-				code = Internal
-			case connect.CodeDataLoss, connect.CodeUnimplemented:
-				code = Protocol
-			case connect.CodeAlreadyExists, connect.CodeAborted, connect.CodeFailedPrecondition:
-				code = Conflict
-			case connect.CodeOutOfRange:
-				code = InvalidArgument
-			}
+		if errors.As(err, &wire) {
+			code = wireErrorCode(wire)
 		} else if errors.As(err, &timeout) && timeout.Timeout() {
 			code = DeadlineExceeded
 		} else if errors.As(err, &syntax) || errors.As(err, &shape) || errors.Is(err, io.ErrUnexpectedEOF) {
 			code = Protocol
 		}
 	}
-	return &Error{Code: code, Operation: op, Reason: "REQUEST_FAILED", Cause: err,
-		Retryable: code == Unavailable || code == ResourceExhausted}
+	reason := "REQUEST_FAILED"
+	retryable := code == Unavailable || code == ResourceExhausted
+	cause := err
+	var wire *dataplane.WireError
+	if errors.As(err, &wire) {
+		if wire.Reason != "" {
+			reason = wire.Reason
+		}
+		retryable = wire.Retryable
+		if wire.Detail != "" {
+			cause = errors.New(wire.Detail)
+		}
+	}
+	return &Error{Code: code, Operation: op, Reason: reason, Cause: cause, Retryable: retryable}
+}
+
+func wireErrorCode(err *dataplane.WireError) ErrorCode {
+	if err.Kind == dataplane.ErrorProtocol {
+		return Protocol
+	}
+	if err.Kind == dataplane.ErrorHTTP {
+		switch err.StatusCode {
+		case 400:
+			return InvalidArgument
+		case 401:
+			return Unauthenticated
+		case 403:
+			return PermissionDenied
+		case 404:
+			return NotFound
+		case 409:
+			return Conflict
+		case 429:
+			return ResourceExhausted
+		default:
+			return Unavailable
+		}
+	}
+	code := ErrorCode(err.Code)
+	switch code {
+	case ErrorCode("UNKNOWN"), ErrorCode("INTERNAL"):
+		return Internal
+	case ErrorCode("DATA_LOSS"), ErrorCode("UNIMPLEMENTED"):
+		return Protocol
+	case ErrorCode("ALREADY_EXISTS"), ErrorCode("ABORTED"), ErrorCode("FAILED_PRECONDITION"):
+		return Conflict
+	case ErrorCode("OUT_OF_RANGE"):
+		return InvalidArgument
+	case "":
+		return Unavailable
+	default:
+		return code
+	}
 }
 
 type generationReader struct {

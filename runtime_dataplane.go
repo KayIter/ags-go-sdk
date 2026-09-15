@@ -3,16 +3,12 @@ package ags
 import (
 	"bytes"
 	"context"
-	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/dataplane"
-	fsproto "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/filesystem"
-	processproto "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/process"
 )
 
 type runtimeDataPlane struct {
@@ -58,19 +54,19 @@ func (d *runtimeDataPlane) Write(ctx context.Context, path string, body io.Reade
 	if err != nil {
 		return FileInfo{}, mapDataPlaneError("Files.Write", err)
 	}
-	return mapWriteInfo(info), nil
+	return mapDataPlaneFileInfo(info), nil
 }
 func (d *runtimeDataPlane) List(ctx context.Context, path string, depth int, user string) (result []FileInfo, err error) {
 	ctx, finish, _ := d.requestOperation(ctx, "Files.List")
 	defer finish()
 	defer func() { err = operationError(ctx, "Files.List", err) }()
-	response, err := d.wire.Filesystem().ListDir(ctx, dataplane.Request(d.wire, &fsproto.ListDirRequest{Path: path, Depth: uint32(depth)}, user))
+	entries, err := d.wire.ListFiles(ctx, path, depth, user)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]FileInfo, 0, len(response.Msg.GetEntries()))
-	for _, e := range response.Msg.GetEntries() {
-		out = append(out, mapProtoFileInfo(e))
+	out := make([]FileInfo, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, mapDataPlaneFileInfo(entry))
 	}
 	return out, nil
 }
@@ -78,56 +74,44 @@ func (d *runtimeDataPlane) Run(ctx context.Context, command string, opts Command
 	ctx, finish, started := d.requestOperation(ctx, "Commands.Run")
 	defer finish()
 	defer func() { err = operationError(ctx, "Commands.Run", err) }()
-	cfg := &processproto.ProcessConfig{Cmd: command, Args: opts.Args, Envs: opts.Env}
-	if opts.Cwd != "" {
-		cfg.Cwd = &opts.Cwd
-	}
+	cfg := dataplane.ProcessConfig{Command: command, Args: opts.Args, Env: opts.Env, CWD: opts.Cwd}
 	limit := opts.MaxOutputBytes
 	if limit == 0 {
 		limit = DefaultMaxOutputBytes
 	}
 	stdout, stderr := &limitedOutput{limit: limit}, &limitedOutput{limit: limit}
-	stream, err := d.wire.Process().Start(ctx, dataplane.Request(d.wire, &processproto.StartRequest{Process: cfg}, string(opts.User)))
+	stream, err := d.wire.StartProcess(ctx, cfg, string(opts.User))
 	if err != nil {
 		return CommandResult{}, err
 	}
 	defer stream.Close()
-	var pid uint32
-	for stream.Receive() {
-		if start := stream.Msg().GetEvent().GetStart(); start != nil {
-			pid = start.GetPid()
-			break
-		}
-	}
-	if pid == 0 {
-		if err := stream.Err(); err != nil {
-			return CommandResult{}, err
-		}
-		return CommandResult{}, codeError(Protocol, "Commands.Run", "START_EVENT_MISSING")
-	}
 	started()
-	for stream.Receive() {
-		event := stream.Msg().GetEvent()
-		if data := event.GetData(); data != nil {
-			stdout.write(data.GetStdout())
-			stderr.write(data.GetStderr())
+	for {
+		event, receiveErr := stream.Recv()
+		if receiveErr != nil {
+			if receiveErr == io.EOF {
+				break
+			}
+			return CommandResult{}, receiveErr
 		}
-		if end := event.GetEnd(); end != nil {
-			return CommandResult{ExitCode: int(end.GetExitCode()), Stdout: stdout.bytes(), Stderr: stderr.bytes(), StdoutTruncated: stdout.truncated, StderrTruncated: stderr.truncated}, nil
+		switch event.Kind {
+		case dataplane.ProcessStdout:
+			stdout.write(event.Data)
+		case dataplane.ProcessStderr:
+			stderr.write(event.Data)
+		case dataplane.ProcessEnd:
+			return CommandResult{ExitCode: event.Exit.Code, Stdout: stdout.bytes(), Stderr: stderr.bytes(), StdoutTruncated: stdout.truncated, StderrTruncated: stderr.truncated}, nil
 		}
 	}
 	if ctx.Err() != nil && context.Cause(d.lifetime) == nil {
 		killCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		_, _ = d.wire.Process().SendSignal(killCtx, dataplane.Request(d.wire, &processproto.SendSignalRequest{Process: &processproto.ProcessSelector{Selector: &processproto.ProcessSelector_Pid{Pid: pid}}, Signal: processproto.Signal_SIGNAL_SIGKILL}, string(opts.User)))
+		_ = d.wire.SendProcessSignal(killCtx, stream.PID, dataplane.SignalKILL, string(opts.User))
 		code := DeadlineExceeded
 		if ctx.Err() == context.Canceled {
 			code = Canceled
 		}
 		return CommandResult{}, &Error{Code: code, Operation: "Commands.Run", Cause: ctx.Err()}
-	}
-	if err := stream.Err(); err != nil {
-		return CommandResult{}, err
 	}
 	return CommandResult{}, codeError(Protocol, "Commands.Run", "END_EVENT_MISSING")
 }
@@ -164,65 +148,18 @@ func (w *limitedOutput) bytes() []byte {
 	defer w.mu.Unlock()
 	return append([]byte(nil), w.value.Bytes()...)
 }
-func mapWriteInfo(v dataplane.WriteInfo) FileInfo {
-	out := FileInfo{Name: v.Name, Path: v.Path}
-	if v.Type != nil {
-		if *v.Type == "dir" {
-			out.Type = Directory
-		} else {
-			out.Type = File
-		}
-	}
-	return out
-}
-func mapProtoFileInfo(v *fsproto.EntryInfo) FileInfo {
-	if v == nil {
-		return FileInfo{}
-	}
+func mapDataPlaneFileInfo(v dataplane.FileInfo) FileInfo {
 	kind := UnknownFileType
-	switch v.GetType() {
-	case fsproto.FileType_FILE_TYPE_FILE:
+	switch v.Type {
+	case dataplane.FileTypeFile:
 		kind = File
-	case fsproto.FileType_FILE_TYPE_DIRECTORY:
+	case dataplane.FileTypeDirectory:
 		kind = Directory
 	}
-	out := FileInfo{Name: v.GetName(), Path: v.GetPath(), Type: kind, Size: v.GetSize(), Mode: v.GetMode(), Permissions: v.GetPermissions(), Owner: v.GetOwner(), Group: v.GetGroup()}
-	if v.ModifiedTime != nil {
-		out.ModifiedAt = v.ModifiedTime.AsTime()
-	}
-	if v.SymlinkTarget != nil {
-		target := v.GetSymlinkTarget()
-		out.SymlinkTarget = &target
-	}
-	return out
+	return FileInfo{Name: v.Name, Path: v.Path, Type: kind, Size: v.Size, Mode: v.Mode, Permissions: v.Permissions, Owner: v.Owner, Group: v.Group, ModifiedAt: v.ModifiedAt, SymlinkTarget: v.SymlinkTarget}
 }
 func mapDataPlaneError(operation string, err error) error {
-	if errors.Is(err, dataplane.ErrWriteInfoMissing) {
-		return codeError(Protocol, operation, "WRITE_INFO_MISSING")
-	}
-	var status *dataplane.HTTPError
-	if errors.As(err, &status) {
-		return dataPlaneHTTPError(operation, status.StatusCode)
-	}
-	return err
-}
-func dataPlaneHTTPError(operation string, status int) error {
-	code, retryable := Unavailable, true
-	switch status {
-	case 400:
-		code, retryable = InvalidArgument, false
-	case 401:
-		code, retryable = Unauthenticated, false
-	case 403:
-		code, retryable = PermissionDenied, false
-	case 404:
-		code, retryable = NotFound, false
-	case 409:
-		code, retryable = Conflict, false
-	case 429:
-		code = ResourceExhausted
-	}
-	return &Error{Code: code, Operation: operation, Reason: fmt.Sprintf("HTTP_%d", status), Retryable: retryable}
+	return normalizeError(operation, err)
 }
 func (d *runtimeDataPlane) Ready(ctx context.Context) error {
 	if _, err := d.List(ctx, "/tmp", 1, "user"); err == nil {
