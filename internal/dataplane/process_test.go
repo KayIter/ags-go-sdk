@@ -1,6 +1,7 @@
 package dataplane
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -15,6 +16,7 @@ import (
 
 type semanticProcess struct {
 	processconnect.UnimplementedProcessHandler
+	ptyData []byte
 }
 
 func (semanticProcess) List(context.Context, *connect.Request[process.ListRequest]) (*connect.Response[process.ListResponse], error) {
@@ -30,7 +32,7 @@ func (semanticProcess) Connect(_ context.Context, request *connect.Request[proce
 	return stream.Send(&process.ConnectResponse{Event: endProcessEvent(0)})
 }
 
-func (semanticProcess) Start(_ context.Context, request *connect.Request[process.StartRequest], stream *connect.ServerStream[process.StartResponse]) error {
+func (s semanticProcess) Start(_ context.Context, request *connect.Request[process.StartRequest], stream *connect.ServerStream[process.StartResponse]) error {
 	if err := stream.Send(&process.StartResponse{Event: keepaliveProcessEvent()}); err != nil {
 		return err
 	}
@@ -39,12 +41,36 @@ func (semanticProcess) Start(_ context.Context, request *connect.Request[process
 	}
 	data := &process.ProcessEvent_DataEvent{Output: &process.ProcessEvent_DataEvent_Stdout{Stdout: []byte("out")}}
 	if request.Msg.Pty != nil {
-		data.Output = &process.ProcessEvent_DataEvent_Pty{Pty: []byte("pty")}
+		payload := s.ptyData
+		if payload == nil {
+			payload = []byte("pty")
+		}
+		data.Output = &process.ProcessEvent_DataEvent_Pty{Pty: payload}
 	}
 	if err := stream.Send(&process.StartResponse{Event: &process.ProcessEvent{Event: &process.ProcessEvent_Data{Data: data}}}); err != nil {
 		return err
 	}
 	return stream.Send(&process.StartResponse{Event: endProcessEvent(7)})
+}
+
+func TestPTYDoesNotApplyCommandFrameLimit(t *testing.T) {
+	mux := http.NewServeMux()
+	path, handler := processconnect.NewProcessHandler(semanticProcess{ptyData: bytes.Repeat([]byte("x"), CommandFrameLimit+1)})
+	mux.Handle(path, handler)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	stream, err := New(server.URL, "token", server.Client()).StartPTY(context.Background(), PTYConfig{Command: "sh", Size: PTYSize{Cols: 80, Rows: 24}}, "USER")
+	if err != nil {
+		t.Fatal(err)
+	}
+	event, err := stream.Recv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.Kind != ProcessPTY || len(event.Data) != CommandFrameLimit+1 {
+		t.Fatalf("pty event kind=%v bytes=%d", event.Kind, len(event.Data))
+	}
 }
 
 func (semanticProcess) SendInput(context.Context, *connect.Request[process.SendInputRequest]) (*connect.Response[process.SendInputResponse], error) {
