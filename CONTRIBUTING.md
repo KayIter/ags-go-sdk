@@ -59,13 +59,19 @@ Keep the user-facing API cohesive and the wire implementation private:
   it must return the canonical root `*ags.Sandbox`.
 - `internal/cloudapi` owns Cloud request routing and generated Cloud-model adaptation.
 - `internal/dataplane` owns immutable runtime endpoints, instance access material, authentication
-  headers, and low-level HTTP/Connect clients.
-- `internal/gen` contains generated filesystem and process bindings. Root adapters translate their
-  messages into SDK-owned public models.
+  headers, HTTP/Connect clients, generated-message construction, start barriers, wire-event
+  parsing, and private semantic DTOs.
+- `internal/gen` contains generated filesystem and process bindings and is consumed only by
+  `internal/dataplane` or protocol test fixtures. Root production files must not import Connect or
+  generated bindings.
 
 Do not move Files, Commands, Code, PTY, or Metrics into separate public packages merely to reduce
 file size. Split private implementation behind `internal/` boundaries while preserving the simple
 `Client -> Sandbox` user model.
+
+Do not expose low-level data-plane getters or generic request builders from the private client.
+Add a semantic operation to `internal/dataplane` instead; `make verify` enforces this dependency
+direction.
 
 ## Protocol changes
 

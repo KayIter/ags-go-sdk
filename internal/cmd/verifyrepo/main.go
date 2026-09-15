@@ -66,12 +66,18 @@ func privateWireBoundaryFailures(root string) []string {
 		failures = append(failures, err.Error())
 	}
 	header := "X-Access-" + "Token"
+	fset := token.NewFileSet()
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
 		if entry.IsDir() {
-			if path == ".git" || path == filepath.Join(root, "internal", "gen") {
+			if rel == ".git" || rel == "internal/gen" {
 				return filepath.SkipDir
 			}
 			return nil
@@ -83,8 +89,24 @@ func privateWireBoundaryFailures(root string) []string {
 		if err != nil {
 			return err
 		}
-		if strings.Contains(string(data), header) && !strings.HasPrefix(filepath.ToSlash(path), "internal/dataplane/") {
+		if strings.Contains(string(data), header) && !strings.HasPrefix(rel, "internal/dataplane/") {
 			failures = append(failures, fmt.Sprintf("%s contains runtime authentication outside internal/dataplane", path))
+		}
+		file, parseErr := parser.ParseFile(fset, path, data, 0)
+		if parseErr != nil {
+			return parseErr
+		}
+		for _, imported := range file.Imports {
+			value := strings.Trim(imported.Path.Value, `"`)
+			if !strings.Contains(rel, "/") && (value == "connectrpc.com/connect" || strings.Contains(value, "/internal/gen/")) {
+				failures = append(failures, fmt.Sprintf("%s imports private wire package %s from the public root package", path, value))
+			}
+			if strings.Contains(value, "/internal/gen/") && !strings.HasPrefix(rel, "internal/dataplane/") {
+				failures = append(failures, fmt.Sprintf("%s imports generated bindings outside internal/dataplane", path))
+			}
+		}
+		if strings.HasPrefix(rel, "internal/dataplane/") {
+			failures = append(failures, dataPlaneEscapeHatchFailures(path, file, fset)...)
 		}
 		return nil
 	})
@@ -92,6 +114,42 @@ func privateWireBoundaryFailures(root string) []string {
 		failures = append(failures, err.Error())
 	}
 	return failures
+}
+
+func dataPlaneEscapeHatchFailures(path string, file *ast.File, fset *token.FileSet) []string {
+	forbiddenMethods := map[string]bool{
+		"BaseURL": true, "HTTPClient": true, "Filesystem": true, "Process": true,
+	}
+	var failures []string
+	for _, declaration := range file.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		if function.Recv == nil && function.Name.Name == "Request" {
+			failures = append(failures, fmt.Sprintf("%s:%d exposes forbidden data-plane escape hatch Request", path, fset.Position(function.Pos()).Line))
+			continue
+		}
+		if forbiddenMethods[function.Name.Name] && receiverName(function.Recv) == "Client" {
+			failures = append(failures, fmt.Sprintf("%s:%d exposes forbidden data-plane escape hatch Client.%s", path, fset.Position(function.Pos()).Line, function.Name.Name))
+		}
+	}
+	return failures
+}
+
+func receiverName(receiver *ast.FieldList) string {
+	if receiver == nil || len(receiver.List) != 1 {
+		return ""
+	}
+	expr := receiver.List[0].Type
+	if pointer, ok := expr.(*ast.StarExpr); ok {
+		expr = pointer.X
+	}
+	name, _ := expr.(*ast.Ident)
+	if name == nil {
+		return ""
+	}
+	return name.Name
 }
 
 func exportedDocFailures(root string) []string {

@@ -54,12 +54,16 @@ make verify
 - 公共 `sandbox` 包只提供基于环境变量的快捷函数和类型别名，并始终返回根包定义的
   `*ags.Sandbox`。
 - `internal/cloudapi` 负责 Cloud Action 路由及 Cloud 生成模型适配。
-- `internal/dataplane` 负责不可变的运行时 Endpoint、实例访问材料、鉴权 Header 和底层
-  HTTP/Connect Client。
-- `internal/gen` 保存 Filesystem 和 Process 生成代码；根包适配器将其转换为 SDK 自有模型。
+- `internal/dataplane` 负责不可变的运行时 Endpoint、实例访问材料、鉴权 Header、底层
+  HTTP/Connect Client、生成消息构造、start barrier、wire event 解析和私有语义 DTO。
+- `internal/gen` 保存 Filesystem 和 Process 生成代码，只允许 `internal/dataplane` 或协议测试
+  夹具引用。根目录生产代码不得 import Connect 或生成代码。
 
 不要仅为了缩短文件，就把 Files、Commands、Code、PTY 或 Metrics 拆成多个公共 package。
 应在保持 `Client -> Sandbox` 用户模型不变的前提下，把私有实现拆入 `internal/`。
+
+不要从私有 Client 暴露底层 getter 或泛型请求构造器。应在 `internal/dataplane` 增加语义操作；
+`make verify` 会检查该依赖方向。
 
 ## 协议修改
 
