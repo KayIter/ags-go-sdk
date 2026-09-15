@@ -17,6 +17,10 @@ pre-1.0 versions may include documented source-incompatible changes.
 
 ### Changed
 
+- Internal-only architecture refactor: Cloud/Monitor orchestration now lives in
+  `internal/controlplane`, generation and bounded handle ownership in `internal/runtime`, and
+  cross-layer private DTOs in `internal/model`. The root package is a public facade and the
+  public API snapshot is unchanged.
 - Cloud actions use the official Tencent Cloud Go SDK behind internal adapters.
 - Generated filesystem/process bindings and data-plane credentials are confined to internal
   adapters instead of becoming accidental public packages.

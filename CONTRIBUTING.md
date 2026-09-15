@@ -51,13 +51,20 @@ Default tests must not contact Tencent Cloud.
 
 ## Package boundaries
 
+Read [ARCHITECTURE.md](ARCHITECTURE.md) before changing an internal boundary.
+
 Keep the user-facing API cohesive and the wire implementation private:
 
 - The root `ags` package owns `Client`, `Sandbox`, service facades, options, results, and stable
   errors. Adding a feature does not by itself justify another public package.
 - The public `sandbox` package contains only environment-backed convenience functions and aliases;
   it must return the canonical root `*ags.Sandbox`.
-- `internal/cloudapi` owns Cloud request routing and generated Cloud-model adaptation.
+- `internal/controlplane` owns Cloud/Monitor clients, action mapping, lifecycle polling, Cloud
+  error normalization, and runtime-generation acquisition.
+- `internal/runtime` owns Sandbox generations, handle lifetimes, stream pumps, bounded queues,
+  aggregation, and local invalidation.
+- `internal/model` contains only wire-independent DTOs and error categories shared across private
+  layers; it must not alias public or generated types.
 - `internal/dataplane` owns immutable runtime endpoints, instance access material, authentication
   headers, HTTP/Connect clients, generated-message construction, start barriers, wire-event
   parsing, and private semantic DTOs.

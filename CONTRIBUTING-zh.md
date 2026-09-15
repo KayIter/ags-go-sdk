@@ -47,13 +47,20 @@ make verify
 
 ## 包边界
 
+修改内部边界前，请先阅读 [架构说明](ARCHITECTURE-zh.md)。
+
 面向用户的 API 保持内聚，协议实现放在私有边界内：
 
 - 根 `ags` 包定义 `Client`、`Sandbox`、能力入口、选项、结果和稳定错误。新增一个功能本身
   不是增加公共 package 的理由。
 - 公共 `sandbox` 包只提供基于环境变量的快捷函数和类型别名，并始终返回根包定义的
   `*ags.Sandbox`。
-- `internal/cloudapi` 负责 Cloud Action 路由及 Cloud 生成模型适配。
+- `internal/controlplane` 负责 Cloud/Monitor Client、Action 映射、生命周期轮询、Cloud 错误
+  归一化和 runtime generation 获取。
+- `internal/runtime` 负责 Sandbox generation、handle 生命周期、stream pump、有界队列、聚合
+  和本地失效。
+- `internal/model` 只保存内部层共享的 wire-independent DTO 和错误分类，不得 alias 公共类型
+  或生成类型。
 - `internal/dataplane` 负责不可变的运行时 Endpoint、实例访问材料、鉴权 Header、底层
   HTTP/Connect Client、生成消息构造、start barrier、wire event 解析和私有语义 DTO。
 - `internal/gen` 保存 Filesystem 和 Process 生成代码，只允许 `internal/dataplane` 或协议测试

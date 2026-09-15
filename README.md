@@ -156,8 +156,8 @@ Default tests are offline. Real Cloud tests require explicit opt-in and are docu
 [`contracts/`](contracts/). The verification suite also compiles the public consumer fixtures
 and rejects imports of removed legacy packages.
 
-See the [Cookbook](examples/cookbook/README.md), [Security Policy](SECURITY.md), and
-[Contributing Guide](CONTRIBUTING.md).
+See the [Architecture](ARCHITECTURE.md), [Cookbook](examples/cookbook/README.md),
+[Security Policy](SECURITY.md), and [Contributing Guide](CONTRIBUTING.md).
 
 ## License
 

@@ -14,9 +14,11 @@ This repository is the public Go SDK for Tencent Cloud Agent Sandbox.
   calls.
 - Public signatures must not expose Tencent Cloud generated models, protobuf messages, Connect
   types, endpoints, headers, or secret-bearing connection objects.
-- Keep the root `ags` package as the cohesive public API. Put Cloud wire code in
-  `internal/cloudapi`, runtime authentication and transports in `internal/dataplane`, and generated
-  bindings in `internal/gen`; do not create feature packages that fragment the Sandbox model.
+- Keep the root `ags` package as the cohesive public API. Put Cloud/Monitor orchestration in
+  `internal/controlplane`, generation and handle ownership in `internal/runtime`, runtime
+  authentication and transports in `internal/dataplane`, shared private DTOs in `internal/model`,
+  and generated bindings in `internal/gen`; do not create feature packages that fragment the
+  Sandbox model. Follow [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Compatibility
 
@@ -42,7 +44,8 @@ hide a breaking change.
 
 Run `make verify` before proposing a change. Default verification must remain offline. Tests that
 need loopback servers are unit tests; tests that contact Tencent Cloud must require explicit
-environment opt-in and independently clean up every created resource.
+environment opt-in and independently clean up every created resource. The authoritative E2E
+environment and cleanup contract is [test/README.md](test/README.md).
 
 When proto files change, update `contracts/proto.json`, regenerate with pinned tools, and prove
 that the generation drift check fails on a temporary modification and passes after restoration.

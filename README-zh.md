@@ -147,8 +147,8 @@ make verify
 默认测试不会访问云端。真实云测试必须显式启用，具体变量和清理要求见
 [贡献指南](CONTRIBUTING-zh.md)。协议与控制面来源记录在 [`contracts/`](contracts/) 中。
 
-更多示例见 [Cookbook](examples/cookbook/README.md)。安全问题请按
-[安全策略](SECURITY.md) 报告。
+实现边界见 [架构说明](ARCHITECTURE-zh.md)，更多示例见
+[Cookbook](examples/cookbook/README.md)。安全问题请按 [安全策略](SECURITY.md) 报告。
 
 ## 许可证
 
