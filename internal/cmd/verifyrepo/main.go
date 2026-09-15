@@ -89,7 +89,8 @@ func privateWireBoundaryFailures(root string) []string {
 		if err != nil {
 			return err
 		}
-		if strings.Contains(string(data), header) && !strings.HasPrefix(rel, "internal/dataplane/") {
+		text := string(data)
+		if strings.Contains(text, header) && !strings.HasPrefix(rel, "internal/dataplane/") {
 			failures = append(failures, fmt.Sprintf("%s contains runtime authentication outside internal/dataplane", path))
 		}
 		file, parseErr := parser.ParseFile(fset, path, data, 0)
@@ -105,6 +106,9 @@ func privateWireBoundaryFailures(root string) []string {
 				failures = append(failures, fmt.Sprintf("%s imports generated bindings outside internal/dataplane", path))
 			}
 		}
+		if !strings.Contains(rel, "/") {
+			failures = append(failures, rootDataPlaneConstructionFailures(path, text, file, fset)...)
+		}
 		if strings.HasPrefix(rel, "internal/dataplane/") {
 			failures = append(failures, dataPlaneEscapeHatchFailures(path, file, fset)...)
 		}
@@ -113,6 +117,40 @@ func privateWireBoundaryFailures(root string) []string {
 	if err != nil {
 		failures = append(failures, err.Error())
 	}
+	return failures
+}
+
+func rootDataPlaneConstructionFailures(path, text string, file *ast.File, fset *token.FileSet) []string {
+	var failures []string
+	if strings.Contains(text, "49983-") {
+		failures = append(failures, fmt.Sprintf("%s contains a runtime endpoint outside internal/dataplane", path))
+	}
+	aliases := make(map[string]bool)
+	for _, imported := range file.Imports {
+		if strings.Trim(imported.Path.Value, `"`) != "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/dataplane" {
+			continue
+		}
+		name := "dataplane"
+		if imported.Name != nil {
+			name = imported.Name.Name
+		}
+		aliases[name] = true
+	}
+	ast.Inspect(file, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		selector, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || selector.Sel.Name != "New" {
+			return true
+		}
+		identifier, ok := selector.X.(*ast.Ident)
+		if ok && aliases[identifier.Name] {
+			failures = append(failures, fmt.Sprintf("%s:%d constructs a raw data-plane client from the public root package", path, fset.Position(call.Pos()).Line))
+		}
+		return true
+	})
 	return failures
 }
 

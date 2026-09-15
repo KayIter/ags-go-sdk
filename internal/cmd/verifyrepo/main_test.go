@@ -57,6 +57,18 @@ func Request[T any](*Client, *T, string) {}
 	}
 }
 
+func TestPrivateWireBoundaryRejectsRootConnectionMaterial(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "runtime.go", `package ags
+import wire "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/dataplane"
+var _ = wire.New("https://49983-instance.region.tencentags.com", "token", nil)
+`)
+	failures := privateWireBoundaryFailures(root)
+	if !containsFailure(failures, "runtime endpoint outside internal/dataplane") || !containsFailure(failures, "constructs a raw data-plane client") {
+		t.Fatalf("failures = %v", failures)
+	}
+}
+
 func writeFixture(t *testing.T, root, name, contents string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(name))

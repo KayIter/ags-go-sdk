@@ -3,12 +3,12 @@ package ags
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/cloudapi"
+	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/dataplane"
 )
 
 // tencentControlPlane is the Native control-plane adapter. Generated request
@@ -20,6 +20,7 @@ type tencentControlPlane struct {
 	endpoint   string
 	timeout    time.Duration
 	api        *cloudapi.AGS
+	runtime    *dataplane.CloudConnector
 }
 
 func newDefaultTencentControlPlane(region string, credential CredentialProvider) *tencentControlPlane {
@@ -31,6 +32,7 @@ func newTencentControlPlane(region string, credential CredentialProvider, endpoi
 	}
 	c := &tencentControlPlane{region: region, credential: credential, client: client, endpoint: endpoint, timeout: timeout}
 	c.api = cloudapi.NewAGS(cloudapi.Config{Region: region, Endpoint: endpoint, Timeout: timeout, Transport: client.Transport}, c.cloudCredential)
+	c.runtime = dataplane.NewCloudConnector(region, c.api, client)
 	return c
 }
 func (c *tencentControlPlane) Create(ctx context.Context, opts CreateOptions) (SandboxInfo, error) {
@@ -136,19 +138,15 @@ func (c *tencentControlPlane) Delete(ctx context.Context, id string) error {
 	return mapCloudError(c.api.Stop(ctx, id), "StopSandboxInstance")
 }
 func (c *tencentControlPlane) dataPlane(ctx context.Context, id string) (dataPlane, error) {
-	token, err := c.api.AcquireToken(ctx, id)
+	wire, err := c.runtime.Connect(ctx, id)
 	if err != nil {
+		var protocol *dataplane.WireError
+		if errors.As(err, &protocol) {
+			return nil, mapDataPlaneError("AcquireSandboxInstanceToken", err)
+		}
 		return nil, mapCloudError(err, "AcquireSandboxInstanceToken")
 	}
-	if token == "" {
-		return nil, codeError(Protocol, "AcquireSandboxInstanceToken", "TOKEN_MISSING")
-	}
-	host := fmt.Sprintf("49983-%s.%s.tencentags.com", id, c.region)
-	client := *c.client
-	// Transport, proxy and TLS settings are shared; a stream has no total HTTP
-	// timeout. Its lifetime is controlled by the caller context and generation.
-	client.Timeout = 0
-	return newDataPlaneWithTimeout("https://"+host, token, &client, c.timeout), nil
+	return newRuntimeDataPlane(wire, c.timeout), nil
 }
 func (c *tencentControlPlane) waitFor(ctx context.Context, id string, target SandboxState) (SandboxInfo, error) {
 	ticker := time.NewTicker(500 * time.Millisecond)

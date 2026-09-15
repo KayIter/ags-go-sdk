@@ -4,13 +4,57 @@
 package dataplane
 
 import (
+	"context"
 	"encoding/base64"
+	"fmt"
 	"net/http"
 
 	"connectrpc.com/connect"
 	filesystemconnect "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/filesystem/filesystemconnect"
 	processconnect "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/process/processconnect"
 )
+
+const runtimeDomain = "tencentags.com"
+
+// AccessTokenSource obtains connection material for one Sandbox generation.
+// Implementations remain behind internal package boundaries.
+type AccessTokenSource interface {
+	AcquireToken(context.Context, string) (string, error)
+}
+
+// CloudConnector resolves Cloud-managed Sandbox connection material without
+// exposing the endpoint or instance token to the root SDK package.
+type CloudConnector struct {
+	region     string
+	source     AccessTokenSource
+	httpClient *http.Client
+}
+
+// NewCloudConnector creates a private connector for one Client identity.
+func NewCloudConnector(region string, source AccessTokenSource, httpClient *http.Client) *CloudConnector {
+	return &CloudConnector{region: region, source: source, httpClient: httpClient}
+}
+
+// Connect resolves an instance token and creates an immutable wire client.
+func (c *CloudConnector) Connect(ctx context.Context, instanceID string) (*Client, error) {
+	if c == nil || c.source == nil {
+		return nil, protocolError("TOKEN_SOURCE_MISSING")
+	}
+	accessToken, err := c.source.AcquireToken(ctx, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	if accessToken == "" {
+		return nil, protocolError("TOKEN_MISSING")
+	}
+	httpClient := &http.Client{}
+	if c.httpClient != nil {
+		*httpClient = *c.httpClient
+		httpClient.Timeout = 0
+	}
+	baseURL := fmt.Sprintf("https://49983-%s.%s.%s", instanceID, c.region, runtimeDomain)
+	return New(baseURL, accessToken, httpClient), nil
+}
 
 // Client owns one generation's private endpoint, instance token, HTTP client,
 // and generated RPC clients. It never exposes the token to its caller.

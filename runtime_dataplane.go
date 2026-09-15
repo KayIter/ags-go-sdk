@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"net/http"
 	"sync"
 	"time"
 
@@ -21,15 +20,9 @@ type runtimeDataPlane struct {
 	cancel   context.CancelCauseFunc
 }
 
-func newRuntimeDataPlane(host, token string) *runtimeDataPlane {
-	return newDataPlane("https://"+host, token, &http.Client{})
-}
-func newDataPlane(base, token string, client *http.Client) *runtimeDataPlane {
-	return newDataPlaneWithTimeout(base, token, client, 30*time.Second)
-}
-func newDataPlaneWithTimeout(base, token string, client *http.Client, timeout time.Duration) *runtimeDataPlane {
+func newRuntimeDataPlane(wire *dataplane.Client, timeout time.Duration) *runtimeDataPlane {
 	lifetime, cancel := context.WithCancelCause(context.Background())
-	return &runtimeDataPlane{wire: dataplane.New(base, token, client), timeout: timeout, lifetime: lifetime, cancel: cancel}
+	return &runtimeDataPlane{wire: wire, timeout: timeout, lifetime: lifetime, cancel: cancel}
 }
 func (d *runtimeDataPlane) Read(ctx context.Context, path, user string) (out io.ReadCloser, err error) {
 	ctx, finish, started := d.requestOperation(ctx, "Files.Read")

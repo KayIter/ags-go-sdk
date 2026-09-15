@@ -8,9 +8,63 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 )
+
+type accessTokenSourceFunc func(context.Context, string) (string, error)
+
+func (f accessTokenSourceFunc) AcquireToken(ctx context.Context, instanceID string) (string, error) {
+	return f(ctx, instanceID)
+}
+
+func TestCloudConnectorOwnsRuntimeConnectionMaterial(t *testing.T) {
+	var acquiredID string
+	baseClient := &http.Client{Timeout: 30 * time.Second, Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("not used")
+	})}
+	connector := NewCloudConnector("ap-guangzhou", accessTokenSourceFunc(func(_ context.Context, instanceID string) (string, error) {
+		acquiredID = instanceID
+		return "private-token", nil
+	}), baseClient)
+
+	client, err := connector.Connect(context.Background(), "sandbox-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acquiredID != "sandbox-id" {
+		t.Fatalf("acquired instance = %q", acquiredID)
+	}
+	if got, want := client.baseURL, "https://49983-sandbox-id.ap-guangzhou.tencentags.com"; got != want {
+		t.Fatalf("base URL = %q, want %q", got, want)
+	}
+	if client.accessToken != "private-token" {
+		t.Fatal("connector did not retain the acquired token privately")
+	}
+	if client.httpClient == baseClient || client.httpClient.Timeout != 0 || baseClient.Timeout != 30*time.Second {
+		t.Fatalf("streaming client clone = %#v, base timeout = %v", client.httpClient, baseClient.Timeout)
+	}
+}
+
+func TestCloudConnectorRejectsMissingTokenAndPreservesSourceError(t *testing.T) {
+	connector := NewCloudConnector("ap-guangzhou", accessTokenSourceFunc(func(context.Context, string) (string, error) {
+		return "", nil
+	}), nil)
+	_, err := connector.Connect(context.Background(), "sandbox-id")
+	var wire *WireError
+	if !errors.As(err, &wire) || wire.Kind != ErrorProtocol || wire.Reason != "TOKEN_MISSING" {
+		t.Fatalf("missing token error = %#v", err)
+	}
+
+	sourceErr := errors.New("source failure")
+	connector = NewCloudConnector("ap-guangzhou", accessTokenSourceFunc(func(context.Context, string) (string, error) {
+		return "", sourceErr
+	}), nil)
+	if _, err = connector.Connect(context.Background(), "sandbox-id"); !errors.Is(err, sourceErr) {
+		t.Fatalf("source error = %v", err)
+	}
+}
 
 func TestRequestKeepsInstanceTokenPrivateAndMapsUser(t *testing.T) {
 	seen := make(chan *http.Request, 1)
