@@ -12,10 +12,11 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/cloudapi"
-	fsproto "github.com/TencentCloudAgentRuntime/ags-go-sdk/pb/filesystem"
-	fsconnect "github.com/TencentCloudAgentRuntime/ags-go-sdk/pb/filesystem/filesystemconnect"
-	pp "github.com/TencentCloudAgentRuntime/ags-go-sdk/pb/process"
-	pc "github.com/TencentCloudAgentRuntime/ags-go-sdk/pb/process/processconnect"
+	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/dataplane"
+	fsproto "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/filesystem"
+	fsconnect "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/filesystem/filesystemconnect"
+	pp "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/process"
+	pc "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/process/processconnect"
 )
 
 func TestReviewExplicitUploadUsers(t *testing.T) {
@@ -26,7 +27,7 @@ func TestReviewExplicitUploadUsers(t *testing.T) {
 				actual, _, _ := r.BasicAuth()
 				seen <- actual
 				_, _ = io.Copy(io.Discard, r.Body)
-				if actual != dataPlaneUser(string(user)) {
+				if actual != dataplane.NormalizeUser(string(user)) {
 					w.WriteHeader(401)
 					return
 				}

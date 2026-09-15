@@ -14,6 +14,9 @@ This repository is the public Go SDK for Tencent Cloud Agent Sandbox.
   calls.
 - Public signatures must not expose Tencent Cloud generated models, protobuf messages, Connect
   types, endpoints, headers, or secret-bearing connection objects.
+- Keep the root `ags` package as the cohesive public API. Put Cloud wire code in
+  `internal/cloudapi`, runtime authentication and transports in `internal/dataplane`, and generated
+  bindings in `internal/gen`; do not create feature packages that fragment the Sandbox model.
 
 ## Compatibility
 

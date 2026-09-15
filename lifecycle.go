@@ -13,7 +13,7 @@ import (
 	"connectrpc.com/connect"
 )
 
-func (d *legacyDataPlane) unregister(handle interface{ invalidate() error }) {
+func (d *runtimeDataPlane) unregister(handle interface{ invalidate() error }) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	for i, h := range d.handles {
@@ -26,7 +26,7 @@ func (d *legacyDataPlane) unregister(handle interface{ invalidate() error }) {
 
 // Each data-plane generation owns a cancellation root. Caller cancellation is
 // distinct from generation invalidation: the latter must not kill remote jobs.
-func (d *legacyDataPlane) operation(ctx context.Context, op string) (context.Context, func()) {
+func (d *runtimeDataPlane) operation(ctx context.Context, op string) (context.Context, func()) {
 	child, cancel := context.WithCancelCause(ctx)
 	stop := context.AfterFunc(d.lifetime, func() { cancel(context.Cause(d.lifetime)) })
 	if cause := context.Cause(d.lifetime); cause != nil {
@@ -38,7 +38,7 @@ func (d *legacyDataPlane) operation(ctx context.Context, op string) (context.Con
 // requestOperation adds the configured request budget to an operation. For a
 // stream, started must be called after its start barrier so the delivered
 // handle remains governed only by the caller and data-plane generation.
-func (d *legacyDataPlane) requestOperation(ctx context.Context, op string) (context.Context, func(), func()) {
+func (d *runtimeDataPlane) requestOperation(ctx context.Context, op string) (context.Context, func(), func()) {
 	child, finishLifetime := d.operation(ctx, op)
 	request, cancel := context.WithCancelCause(child)
 	var timer *time.Timer

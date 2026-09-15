@@ -6,7 +6,7 @@ syntax = "proto3";
 
 package filesystem;
 
-option go_package = "github.com/TencentCloudAgentRuntime/ags-go-sdk/pb/filesystem";
+option go_package = "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/filesystem";
 
 import "google/protobuf/timestamp.proto";
 

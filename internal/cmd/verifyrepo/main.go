@@ -48,6 +48,7 @@ func main() {
 		failures = append(failures, err.Error())
 	}
 	failures = append(failures, exportedDocFailures(".")...)
+	failures = append(failures, privateWireBoundaryFailures(".")...)
 	if len(failures) > 0 {
 		for _, failure := range failures {
 			fmt.Fprintln(os.Stderr, failure)
@@ -55,6 +56,42 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println("repository documentation and path checks passed")
+}
+
+func privateWireBoundaryFailures(root string) []string {
+	var failures []string
+	if _, err := os.Stat(filepath.Join(root, "pb")); err == nil {
+		failures = append(failures, "generated bindings must live under internal/gen, not public pb")
+	} else if !os.IsNotExist(err) {
+		failures = append(failures, err.Error())
+	}
+	header := "X-Access-" + "Token"
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if path == ".git" || path == filepath.Join(root, "internal", "gen") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(data), header) && !strings.HasPrefix(filepath.ToSlash(path), "internal/dataplane/") {
+			failures = append(failures, fmt.Sprintf("%s contains runtime authentication outside internal/dataplane", path))
+		}
+		return nil
+	})
+	if err != nil {
+		failures = append(failures, err.Error())
+	}
+	return failures
 }
 
 func exportedDocFailures(root string) []string {

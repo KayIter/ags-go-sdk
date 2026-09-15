@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	processproto "github.com/TencentCloudAgentRuntime/ags-go-sdk/pb/process"
-	processconnect "github.com/TencentCloudAgentRuntime/ags-go-sdk/pb/process/processconnect"
+	processproto "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/process"
+	processconnect "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/process/processconnect"
 )
 
 type endBeforeAckProcess struct {

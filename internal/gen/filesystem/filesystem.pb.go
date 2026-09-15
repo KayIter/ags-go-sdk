@@ -1328,7 +1328,7 @@ const file_tool_filesystem_filesystem_proto_rawDesc = "" +
 	"\bWatchDir\x12\x1b.filesystem.WatchDirRequest\x1a\x1c.filesystem.WatchDirResponse0\x01\x12T\n" +
 	"\rCreateWatcher\x12 .filesystem.CreateWatcherRequest\x1a!.filesystem.CreateWatcherResponse\x12]\n" +
 	"\x10GetWatcherEvents\x12#.filesystem.GetWatcherEventsRequest\x1a$.filesystem.GetWatcherEventsResponse\x12T\n" +
-	"\rRemoveWatcher\x12 .filesystem.RemoveWatcherRequest\x1a!.filesystem.RemoveWatcherResponseB>Z<github.com/TencentCloudAgentRuntime/ags-go-sdk/pb/filesystemb\x06proto3"
+	"\rRemoveWatcher\x12 .filesystem.RemoveWatcherRequest\x1a!.filesystem.RemoveWatcherResponseBHZFgithub.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/filesystemb\x06proto3"
 
 var (
 	file_tool_filesystem_filesystem_proto_rawDescOnce sync.Once

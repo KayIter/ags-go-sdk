@@ -42,6 +42,11 @@ Creation uses `ags.CreateOptions`, `ags.ToolRef`, `ags.MountOption`, and `ags.Sa
 List, Get, and Metrics return SDK-owned types. Code that accessed generated Cloud models or
 protobuf values must switch to these public models.
 
+Generated filesystem and process packages are implementation details under `internal/gen`.
+Consumers that imported the former `pb/*` paths must migrate to the corresponding SDK-owned
+Files, Commands, PTY, Watch, and process models; generated messages are not a supported public
+extension point.
+
 Timeout fields use `time.Duration` pointers. Create and Resume accept 30 seconds through 24 hours
 in whole seconds. Update accepts 300 seconds through 24 hours. Values are never clamped. Current
 Cloud deployments may enforce a 300-second policy for Create or Resume; a 30-299 second request

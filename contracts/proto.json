@@ -5,10 +5,10 @@
     "revision": "97d10b529fd506f2ea3ac6a262a8b453fd8cbb14",
     "license": "Apache-2.0"
   },
-  "modifications": ["ags-go-sdk go_package mapping", "prominent modification notice"],
+  "modifications": ["ags-go-sdk internal go_package mapping", "prominent modification notice"],
   "files": [
-    {"path": "proto/tool/filesystem/filesystem.proto", "sha256": "45d5489ee3bf3581792a5980aa20c523efc7c7661b60bb04d9762bd4ce65191d"},
-    {"path": "proto/tool/process/process.proto", "sha256": "e566cc4adb590d129b3790b6c2145a0569f8ef4f419d3728087858c0d99796ed"}
+    {"path": "proto/tool/filesystem/filesystem.proto", "sha256": "291e6bc2884ca79bc6c1c56c8a7d7fcfff3ccb968ff541605e81708b38d5189f"},
+    {"path": "proto/tool/process/process.proto", "sha256": "a456f0e3497abfc74d1d93a3c70a89d5cb8207ed850b57b1c2904d5d0808f6bc"}
   ],
   "generators": {
     "buf": "v1.47.2",

@@ -3,7 +3,6 @@ package ags
 import (
 	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/hex"
 	"io"
 	"path"
@@ -12,22 +11,12 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	legacyfsproto "github.com/TencentCloudAgentRuntime/ags-go-sdk/pb/filesystem"
-	legacyprocess "github.com/TencentCloudAgentRuntime/ags-go-sdk/pb/process"
-	legacyprocessconnect "github.com/TencentCloudAgentRuntime/ags-go-sdk/pb/process/processconnect"
+	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/dataplane"
+	fsproto "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/filesystem"
+	processproto "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/process"
 )
 
-func dataPlaneRequest[T any](msg *T, token, user string) *connect.Request[T] {
-	req := connect.NewRequest(msg)
-	req.Header().Set("X-Access-Token", token)
-	if user == "" {
-		user = "user"
-	}
-	req.Header().Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(user+":")))
-	return req
-}
-
-func (d *legacyDataPlane) Watch(ctx context.Context, root string, opts WatchOptions) (out watchStream, err error) {
+func (d *runtimeDataPlane) Watch(ctx context.Context, root string, opts WatchOptions) (out watchStream, err error) {
 	streamCtx, cancel, started := d.requestOperation(ctx, "Files.Watch")
 	defer func() {
 		if err != nil {
@@ -37,7 +26,7 @@ func (d *legacyDataPlane) Watch(ctx context.Context, root string, opts WatchOpti
 			err = normalizeError("Files.Watch", err)
 		}
 	}()
-	stream, err := d.files.WatchDir(streamCtx, dataPlaneRequest(&legacyfsproto.WatchDirRequest{Path: root, Recursive: opts.Recursive}, d.config.AccessToken, dataPlaneUser(string(opts.User))))
+	stream, err := d.wire.Filesystem().WatchDir(streamCtx, dataplane.Request(d.wire, &fsproto.WatchDirRequest{Path: root, Recursive: opts.Recursive}, string(opts.User)))
 	if err != nil {
 		cancel()
 		return nil, err
@@ -47,7 +36,7 @@ func (d *legacyDataPlane) Watch(ctx context.Context, root string, opts WatchOpti
 		cancel()
 		return nil, err
 	}
-	watch := &legacyWatchStream{ctx: streamCtx, cancel: cancel, root: root, watchID: hex.EncodeToString(random), opts: opts, stream: stream, files: d.files, token: d.config.AccessToken}
+	watch := &runtimeWatchStream{ctx: streamCtx, cancel: cancel, root: root, watchID: hex.EncodeToString(random), opts: opts, stream: stream, wire: d.wire}
 	watch.release = func() { d.unregister(watch) }
 	for stream.Receive() {
 		msg := stream.Msg()
@@ -67,24 +56,21 @@ func (d *legacyDataPlane) Watch(ctx context.Context, root string, opts WatchOpti
 	return nil, codeError(Protocol, "Files.Watch", "START_EVENT_MISSING")
 }
 
-type legacyWatchStream struct {
-	ctx     context.Context
-	cancel  context.CancelFunc
-	root    string
-	watchID string
-	opts    WatchOptions
-	stream  *connect.ServerStreamForClient[legacyfsproto.WatchDirResponse]
-	files   interface {
-		Stat(context.Context, *connect.Request[legacyfsproto.StatRequest]) (*connect.Response[legacyfsproto.StatResponse], error)
-	}
-	token    string
+type runtimeWatchStream struct {
+	ctx      context.Context
+	cancel   context.CancelFunc
+	root     string
+	watchID  string
+	opts     WatchOptions
+	stream   *connect.ServerStreamForClient[fsproto.WatchDirResponse]
+	wire     *dataplane.Client
 	sequence uint64
 	once     sync.Once
 	paused   atomic.Bool
 	release  func()
 }
 
-func (w *legacyWatchStream) Recv() (FileEvent, error) {
+func (w *runtimeWatchStream) Recv() (FileEvent, error) {
 	for w.stream.Receive() {
 		msg := w.stream.Msg()
 		if msg == nil || msg.GetKeepalive() != nil || msg.GetStart() != nil {
@@ -102,7 +88,7 @@ func (w *legacyWatchStream) Recv() (FileEvent, error) {
 		}
 		out := FileEvent{WatchID: w.watchID, Type: fileEventType(event.GetType()), Path: eventPath, Sequence: w.sequence}
 		if w.opts.IncludeEntry && out.Type != FileRemove {
-			info, err := w.files.Stat(w.ctx, dataPlaneRequest(&legacyfsproto.StatRequest{Path: eventPath}, w.token, dataPlaneUser(string(w.opts.User))))
+			info, err := w.wire.Filesystem().Stat(w.ctx, dataplane.Request(w.wire, &fsproto.StatRequest{Path: eventPath}, string(w.opts.User)))
 			if err == nil && info != nil && info.Msg.GetEntry() != nil {
 				mapped := mapProtoFileInfo(info.Msg.GetEntry())
 				out.Entry = &mapped
@@ -119,14 +105,14 @@ func (w *legacyWatchStream) Recv() (FileEvent, error) {
 	}
 	return FileEvent{}, io.EOF
 }
-func (w *legacyWatchStream) Close() error {
+func (w *runtimeWatchStream) Close() error {
 	return w.closeStream()
 }
-func (w *legacyWatchStream) invalidate() error {
+func (w *runtimeWatchStream) invalidate() error {
 	w.paused.Store(true)
 	return w.closeStream()
 }
-func (w *legacyWatchStream) closeStream() error {
+func (w *runtimeWatchStream) closeStream() error {
 	var err error
 	w.once.Do(func() {
 		w.cancel()
@@ -137,24 +123,24 @@ func (w *legacyWatchStream) closeStream() error {
 	})
 	return err
 }
-func fileEventType(v legacyfsproto.EventType) FileEventType {
+func fileEventType(v fsproto.EventType) FileEventType {
 	switch v {
-	case legacyfsproto.EventType_EVENT_TYPE_CREATE:
+	case fsproto.EventType_EVENT_TYPE_CREATE:
 		return FileCreate
-	case legacyfsproto.EventType_EVENT_TYPE_WRITE:
+	case fsproto.EventType_EVENT_TYPE_WRITE:
 		return FileWrite
-	case legacyfsproto.EventType_EVENT_TYPE_REMOVE:
+	case fsproto.EventType_EVENT_TYPE_REMOVE:
 		return FileRemove
-	case legacyfsproto.EventType_EVENT_TYPE_RENAME:
+	case fsproto.EventType_EVENT_TYPE_RENAME:
 		return FileRename
-	case legacyfsproto.EventType_EVENT_TYPE_CHMOD:
+	case fsproto.EventType_EVENT_TYPE_CHMOD:
 		return FileChmod
 	default:
 		return FileEventType("UNKNOWN")
 	}
 }
 
-func (d *legacyDataPlane) OpenPTY(ctx context.Context, opts PTYOptions) (out ptyStream, err error) {
+func (d *runtimeDataPlane) OpenPTY(ctx context.Context, opts PTYOptions) (out ptyStream, err error) {
 	streamCtx, cancel, started := d.requestOperation(ctx, "PTY.Open")
 	defer func() {
 		if err != nil {
@@ -164,12 +150,12 @@ func (d *legacyDataPlane) OpenPTY(ctx context.Context, opts PTYOptions) (out pty
 			err = normalizeError("PTY.Open", err)
 		}
 	}()
-	client := d.process
-	process := &legacyprocess.ProcessConfig{Cmd: opts.Command, Args: opts.Args, Envs: opts.Env}
+	client := d.wire.Process()
+	process := &processproto.ProcessConfig{Cmd: opts.Command, Args: opts.Args, Envs: opts.Env}
 	if opts.Cwd != "" {
 		process.Cwd = &opts.Cwd
 	}
-	req := dataPlaneRequest(&legacyprocess.StartRequest{Process: process, Pty: &legacyprocess.PTY{Size: &legacyprocess.PTY_Size{Cols: opts.Cols, Rows: opts.Rows}}}, d.config.AccessToken, dataPlaneUser(string(opts.User)))
+	req := dataplane.Request(d.wire, &processproto.StartRequest{Process: process, Pty: &processproto.PTY{Size: &processproto.PTY_Size{Cols: opts.Cols, Rows: opts.Rows}}}, string(opts.User))
 	stream, err := client.Start(streamCtx, req)
 	if err != nil {
 		cancel()
@@ -192,7 +178,7 @@ func (d *legacyDataPlane) OpenPTY(ctx context.Context, opts PTYOptions) (out pty
 		cancel()
 		return nil, err
 	}
-	pty := &legacyPTYStream{ctx: streamCtx, cancel: cancel, token: d.config.AccessToken, user: dataPlaneUser(string(opts.User)), client: client, stream: stream, pid: start.GetPid(), sessionID: hex.EncodeToString(random), startPending: true}
+	pty := &runtimePTYStream{ctx: streamCtx, cancel: cancel, wire: d.wire, user: dataplane.NormalizeUser(string(opts.User)), stream: stream, pid: start.GetPid(), sessionID: hex.EncodeToString(random), startPending: true}
 	pty.release = func() { d.unregister(pty) }
 	if err := d.register(pty); err != nil {
 		_ = pty.invalidate()
@@ -202,12 +188,12 @@ func (d *legacyDataPlane) OpenPTY(ctx context.Context, opts PTYOptions) (out pty
 	return pty, nil
 }
 
-type legacyPTYStream struct {
+type runtimePTYStream struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
-	token, user  string
-	client       legacyprocessconnect.ProcessClient
-	stream       *connect.ServerStreamForClient[legacyprocess.StartResponse]
+	wire         *dataplane.Client
+	user         string
+	stream       *connect.ServerStreamForClient[processproto.StartResponse]
 	pid          uint32
 	sessionID    string
 	mu           sync.Mutex
@@ -219,10 +205,10 @@ type legacyPTYStream struct {
 	release      func()
 }
 
-func (p *legacyPTYStream) selector() *legacyprocess.ProcessSelector {
-	return &legacyprocess.ProcessSelector{Selector: &legacyprocess.ProcessSelector_Pid{Pid: p.pid}}
+func (p *runtimePTYStream) selector() *processproto.ProcessSelector {
+	return &processproto.ProcessSelector{Selector: &processproto.ProcessSelector_Pid{Pid: p.pid}}
 }
-func (p *legacyPTYStream) Recv() (PTYEvent, error) {
+func (p *runtimePTYStream) Recv() (PTYEvent, error) {
 	p.mu.Lock()
 	if p.startPending {
 		p.startPending = false
@@ -265,26 +251,26 @@ func (p *legacyPTYStream) Recv() (PTYEvent, error) {
 	}
 	return PTYEvent{}, io.EOF
 }
-func (p *legacyPTYStream) ID() string { return p.sessionID }
-func (p *legacyPTYStream) Input(ctx context.Context, data []byte) error {
+func (p *runtimePTYStream) ID() string { return p.sessionID }
+func (p *runtimePTYStream) Input(ctx context.Context, data []byte) error {
 	ctx, finish, err := p.operation(ctx, "PTY.Write")
 	if err != nil {
 		return err
 	}
 	defer finish()
-	_, err = p.client.SendInput(ctx, dataPlaneRequest(&legacyprocess.SendInputRequest{Process: p.selector(), Input: &legacyprocess.ProcessInput{Input: &legacyprocess.ProcessInput_Pty{Pty: data}}}, p.token, p.user))
+	_, err = p.wire.Process().SendInput(ctx, dataplane.Request(p.wire, &processproto.SendInputRequest{Process: p.selector(), Input: &processproto.ProcessInput{Input: &processproto.ProcessInput_Pty{Pty: data}}}, p.user))
 	return operationError(ctx, "PTY.Write", err)
 }
-func (p *legacyPTYStream) Resize(ctx context.Context, cols, rows uint32) error {
+func (p *runtimePTYStream) Resize(ctx context.Context, cols, rows uint32) error {
 	ctx, finish, err := p.operation(ctx, "PTY.Resize")
 	if err != nil {
 		return err
 	}
 	defer finish()
-	_, err = p.client.Update(ctx, dataPlaneRequest(&legacyprocess.UpdateRequest{Process: p.selector(), Pty: &legacyprocess.PTY{Size: &legacyprocess.PTY_Size{Cols: cols, Rows: rows}}}, p.token, p.user))
+	_, err = p.wire.Process().Update(ctx, dataplane.Request(p.wire, &processproto.UpdateRequest{Process: p.selector(), Pty: &processproto.PTY{Size: &processproto.PTY_Size{Cols: cols, Rows: rows}}}, p.user))
 	return operationError(ctx, "PTY.Resize", err)
 }
-func (p *legacyPTYStream) operation(ctx context.Context, op string) (context.Context, func(), error) {
+func (p *runtimePTYStream) operation(ctx context.Context, op string) (context.Context, func(), error) {
 	p.mu.Lock()
 	if p.paused.Load() {
 		p.mu.Unlock()
@@ -313,7 +299,7 @@ func (p *legacyPTYStream) operation(ctx context.Context, op string) (context.Con
 		}
 	}, nil
 }
-func (p *legacyPTYStream) Close() error {
+func (p *runtimePTYStream) Close() error {
 	var result error
 	p.once.Do(func() {
 		if p.release != nil {
@@ -323,9 +309,8 @@ func (p *legacyPTYStream) Close() error {
 		if !p.ended {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			_, result = p.client.SendSignal(ctx, dataPlaneRequest(
-				&legacyprocess.SendSignalRequest{Process: p.selector(), Signal: legacyprocess.Signal_SIGNAL_SIGTERM},
-				p.token,
+			_, result = p.wire.Process().SendSignal(ctx, dataplane.Request(p.wire,
+				&processproto.SendSignalRequest{Process: p.selector(), Signal: processproto.Signal_SIGNAL_SIGTERM},
 				p.user,
 			))
 		}
@@ -341,7 +326,7 @@ func (p *legacyPTYStream) Close() error {
 
 // invalidate terminates the local handle without signalling the remote process.
 // Pause/Resume uses this path because the old access token and stream are stale.
-func (p *legacyPTYStream) invalidate() error {
+func (p *runtimePTYStream) invalidate() error {
 	p.paused.Store(true)
 	var result error
 	p.once.Do(func() {

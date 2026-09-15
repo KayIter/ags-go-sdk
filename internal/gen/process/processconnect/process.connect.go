@@ -12,7 +12,7 @@ import (
 	connect "connectrpc.com/connect"
 	context "context"
 	errors "errors"
-	process "github.com/TencentCloudAgentRuntime/ags-go-sdk/pb/process"
+	process "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/process"
 	http "net/http"
 	strings "strings"
 )

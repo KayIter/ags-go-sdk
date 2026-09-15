@@ -13,7 +13,7 @@ Tencent modified the copies in 2026 by adding the
 notice. The current hashes and pinned generator versions are machine-readable in
 [`contracts/proto.json`](contracts/proto.json).
 
-The files under `pb/` are generated from these modified protocol files by Buf,
+The files under `internal/gen/` are generated from these modified protocol files by Buf,
 `protoc-gen-go`, and `protoc-gen-connect-go`. Generated files must not be edited manually.
 
 ## Control-plane contract metadata

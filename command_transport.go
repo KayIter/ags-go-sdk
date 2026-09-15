@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	process "github.com/TencentCloudAgentRuntime/ags-go-sdk/pb/process"
-	rpc "github.com/TencentCloudAgentRuntime/ags-go-sdk/pb/process/processconnect"
 	"io"
 	"net/http"
 	"sync"
+
+	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/dataplane"
+	process "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/process"
+	rpc "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/process/processconnect"
 )
 
 // Bound wire frames independently from retained stdout/stderr and event queues.
@@ -72,7 +74,7 @@ func (b *commandFrameBody) Read(p []byte) (int, error) {
 }
 
 type nativeCommandTransport struct {
-	plane        *legacyDataPlane
+	plane        *runtimeDataPlane
 	ctx          context.Context
 	finish       func()
 	once         sync.Once
@@ -82,7 +84,7 @@ type nativeCommandTransport struct {
 	user         string
 }
 
-func (d *legacyDataPlane) Start(ctx context.Context, command string, opts StartOptions) (out *CommandHandle, err error) {
+func (d *runtimeDataPlane) Start(ctx context.Context, command string, opts StartOptions) (out *CommandHandle, err error) {
 	ctx, finish, started := d.requestOperation(ctx, "Commands.Start")
 	defer func() {
 		if out == nil {
@@ -94,9 +96,9 @@ func (d *legacyDataPlane) Start(ctx context.Context, command string, opts StartO
 	if opts.Cwd != "" {
 		cfg.Cwd = &opts.Cwd
 	}
-	client := rpc.NewProcessClient(commandHTTP{d.client}, d.config.BaseURL, connect.WithProtoJSON(), connect.WithReadMaxBytes(commandFrameLimit))
-	user := dataPlaneUser(string(opts.User))
-	stream, err := client.Start(ctx, dataPlaneRequest(&process.StartRequest{Process: cfg}, d.config.AccessToken, user))
+	client := rpc.NewProcessClient(commandHTTP{d.wire.HTTPClient()}, d.wire.BaseURL(), connect.WithProtoJSON(), connect.WithReadMaxBytes(commandFrameLimit))
+	user := dataplane.NormalizeUser(string(opts.User))
+	stream, err := client.Start(ctx, dataplane.Request(d.wire, &process.StartRequest{Process: cfg}, user))
 	if err != nil {
 		return nil, err
 	}
@@ -170,7 +172,7 @@ func (t *nativeCommandTransport) receive() (commandFrame, error) {
 	}
 }
 
-func (d *legacyDataPlane) ConnectCommand(ctx context.Context, pid uint32, opts ConnectCommandOptions) (out *CommandHandle, err error) {
+func (d *runtimeDataPlane) ConnectCommand(ctx context.Context, pid uint32, opts ConnectCommandOptions) (out *CommandHandle, err error) {
 	ctx, finish, started := d.requestOperation(ctx, "Commands.Connect")
 	defer func() {
 		if out == nil {
@@ -178,9 +180,9 @@ func (d *legacyDataPlane) ConnectCommand(ctx context.Context, pid uint32, opts C
 			finish()
 		}
 	}()
-	client := rpc.NewProcessClient(commandHTTP{d.client}, d.config.BaseURL, connect.WithProtoJSON(), connect.WithReadMaxBytes(commandFrameLimit))
-	user := dataPlaneUser(string(opts.User))
-	stream, err := client.Connect(ctx, dataPlaneRequest(&process.ConnectRequest{Process: &process.ProcessSelector{Selector: &process.ProcessSelector_Pid{Pid: pid}}}, d.config.AccessToken, user))
+	client := rpc.NewProcessClient(commandHTTP{d.wire.HTTPClient()}, d.wire.BaseURL(), connect.WithProtoJSON(), connect.WithReadMaxBytes(commandFrameLimit))
+	user := dataplane.NormalizeUser(string(opts.User))
+	stream, err := client.Connect(ctx, dataplane.Request(d.wire, &process.ConnectRequest{Process: &process.ProcessSelector{Selector: &process.ProcessSelector_Pid{Pid: pid}}}, user))
 	if err != nil {
 		return nil, err
 	}
@@ -211,11 +213,11 @@ func (d *legacyDataPlane) ConnectCommand(ctx context.Context, pid uint32, opts C
 	return nil, err
 }
 
-func (d *legacyDataPlane) ListCommands(ctx context.Context, user SandboxUser) (out []ProcessInfo, err error) {
+func (d *runtimeDataPlane) ListCommands(ctx context.Context, user SandboxUser) (out []ProcessInfo, err error) {
 	ctx, finish, _ := d.requestOperation(ctx, "Commands.List")
 	defer finish()
 	defer func() { err = operationError(ctx, "Commands.List", err) }()
-	response, err := d.process.List(ctx, dataPlaneRequest(&process.ListRequest{}, d.config.AccessToken, dataPlaneUser(string(user))))
+	response, err := d.wire.Process().List(ctx, dataplane.Request(d.wire, &process.ListRequest{}, string(user)))
 	if err != nil {
 		return nil, err
 	}
@@ -255,7 +257,7 @@ func (t *nativeCommandTransport) input(ctx context.Context, data []byte) (err er
 	ctx, finish := t.controlContext(ctx)
 	defer finish()
 	defer func() { err = operationError(ctx, "Command.Write", err) }()
-	_, err = t.plane.process.SendInput(ctx, dataPlaneRequest(&process.SendInputRequest{Process: t.selector(), Input: &process.ProcessInput{Input: &process.ProcessInput_Stdin{Stdin: data}}}, t.plane.config.AccessToken, t.user))
+	_, err = t.plane.wire.Process().SendInput(ctx, dataplane.Request(t.plane.wire, &process.SendInputRequest{Process: t.selector(), Input: &process.ProcessInput{Input: &process.ProcessInput_Stdin{Stdin: data}}}, t.user))
 	return err
 }
 func (t *nativeCommandTransport) signal(ctx context.Context, signal ProcessSignal) (err error) {
@@ -266,6 +268,6 @@ func (t *nativeCommandTransport) signal(ctx context.Context, signal ProcessSigna
 	if signal == SignalKILL {
 		value = process.Signal_SIGNAL_SIGKILL
 	}
-	_, err = t.plane.process.SendSignal(ctx, dataPlaneRequest(&process.SendSignalRequest{Process: t.selector(), Signal: value}, t.plane.config.AccessToken, t.user))
+	_, err = t.plane.wire.Process().SendSignal(ctx, dataplane.Request(t.plane.wire, &process.SendSignalRequest{Process: t.selector(), Signal: value}, t.user))
 	return err
 }

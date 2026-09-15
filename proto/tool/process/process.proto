@@ -6,7 +6,7 @@ syntax = "proto3";
 
 package process;
 
-option go_package = "github.com/TencentCloudAgentRuntime/ags-go-sdk/pb/process";
+option go_package = "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/process";
 
 service Process {
     rpc List(ListRequest) returns (ListResponse);

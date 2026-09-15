@@ -2,50 +2,40 @@ package ags
 
 import (
 	"bytes"
-	"connectrpc.com/connect"
 	"context"
-	"encoding/base64"
-	"encoding/json"
+	"errors"
 	"fmt"
-	fsproto "github.com/TencentCloudAgentRuntime/ags-go-sdk/pb/filesystem"
-	fsconnect "github.com/TencentCloudAgentRuntime/ags-go-sdk/pb/filesystem/filesystemconnect"
-	processproto "github.com/TencentCloudAgentRuntime/ags-go-sdk/pb/process"
-	processconnect "github.com/TencentCloudAgentRuntime/ags-go-sdk/pb/process/processconnect"
 	"io"
-	"mime/multipart"
 	"net/http"
-	"net/url"
 	"sync"
 	"time"
+
+	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/dataplane"
+	fsproto "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/filesystem"
+	processproto "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/process"
 )
 
-type legacyDataPlane struct {
-	config   *dataPlaneConfig
-	client   *http.Client
+type runtimeDataPlane struct {
+	wire     *dataplane.Client
 	timeout  time.Duration
-	files    fsconnect.FilesystemClient
-	process  processconnect.ProcessClient
 	mu       sync.Mutex
 	handles  []interface{ invalidate() error }
 	closed   bool
 	lifetime context.Context
 	cancel   context.CancelCauseFunc
 }
-type dataPlaneConfig struct{ BaseURL, Domain, AccessToken string }
 
-func newLegacyDataPlane(host, token string) *legacyDataPlane {
+func newRuntimeDataPlane(host, token string) *runtimeDataPlane {
 	return newDataPlane("https://"+host, token, &http.Client{})
 }
-func newDataPlane(base, token string, client *http.Client) *legacyDataPlane {
+func newDataPlane(base, token string, client *http.Client) *runtimeDataPlane {
 	return newDataPlaneWithTimeout(base, token, client, 30*time.Second)
 }
-func newDataPlaneWithTimeout(base, token string, client *http.Client, timeout time.Duration) *legacyDataPlane {
-	u, _ := url.Parse(base)
-	cfg := &dataPlaneConfig{BaseURL: base, Domain: u.Host, AccessToken: token}
+func newDataPlaneWithTimeout(base, token string, client *http.Client, timeout time.Duration) *runtimeDataPlane {
 	lifetime, cancel := context.WithCancelCause(context.Background())
-	return &legacyDataPlane{config: cfg, client: client, timeout: timeout, lifetime: lifetime, cancel: cancel, files: fsconnect.NewFilesystemClient(client, base, connect.WithProtoJSON()), process: processconnect.NewProcessClient(client, base, connect.WithProtoJSON())}
+	return &runtimeDataPlane{wire: dataplane.New(base, token, client), timeout: timeout, lifetime: lifetime, cancel: cancel}
 }
-func (d *legacyDataPlane) Read(ctx context.Context, path, user string) (out io.ReadCloser, err error) {
+func (d *runtimeDataPlane) Read(ctx context.Context, path, user string) (out io.ReadCloser, err error) {
 	ctx, finish, started := d.requestOperation(ctx, "Files.Read")
 	defer func() {
 		err = operationError(ctx, "Files.Read", err)
@@ -53,86 +43,28 @@ func (d *legacyDataPlane) Read(ctx context.Context, path, user string) (out io.R
 			finish()
 		}
 	}()
-	user = dataPlaneUser(user)
-	u, _ := url.Parse(d.config.BaseURL + "/files")
-	query := u.Query()
-	query.Set("path", path)
-	query.Set("username", user)
-	u.RawQuery = query.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	body, err := d.wire.ReadFile(ctx, path, user)
 	if err != nil {
-		return nil, err
-	}
-	d.setHeaders(req, user)
-	resp, err := d.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		_ = resp.Body.Close()
-		return nil, dataPlaneHTTPError("Files.Read", resp.StatusCode)
+		return nil, mapDataPlaneError("Files.Read", err)
 	}
 	started()
-	return &generationReader{ReadCloser: resp.Body, ctx: ctx, finish: finish, op: "Files.Read"}, nil
+	return &generationReader{ReadCloser: body, ctx: ctx, finish: finish, op: "Files.Read"}, nil
 }
-func (d *legacyDataPlane) Write(ctx context.Context, path string, body io.Reader, user string) (out FileInfo, err error) {
+func (d *runtimeDataPlane) Write(ctx context.Context, path string, body io.Reader, user string) (out FileInfo, err error) {
 	ctx, finish, _ := d.requestOperation(ctx, "Files.Write")
 	defer finish()
 	defer func() { err = operationError(ctx, "Files.Write", err) }()
-	user = dataPlaneUser(user)
-	pipeReader, pipeWriter := io.Pipe()
-	multipartWriter := multipart.NewWriter(pipeWriter)
-	copyDone := make(chan error, 1)
-	go func() {
-		part, err := multipartWriter.CreateFormFile("file", path)
-		if err == nil {
-			_, err = io.Copy(part, body)
-		}
-		if closeErr := multipartWriter.Close(); err == nil {
-			err = closeErr
-		}
-		_ = pipeWriter.CloseWithError(err)
-		copyDone <- err
-	}()
-	u, _ := url.Parse(d.config.BaseURL + "/files")
-	query := u.Query()
-	query.Set("path", path)
-	query.Set("username", user)
-	u.RawQuery = query.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), pipeReader)
+	info, err := d.wire.WriteFile(ctx, path, body, user)
 	if err != nil {
-		_ = pipeReader.Close()
-		return FileInfo{}, err
+		return FileInfo{}, mapDataPlaneError("Files.Write", err)
 	}
-	req.Header.Set("Content-Type", multipartWriter.FormDataContentType())
-	req.Header.Set("X-Access-Token", d.config.AccessToken)
-	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(user+":")))
-	resp, err := d.client.Do(req)
-	if err != nil {
-		_ = pipeReader.Close()
-		return FileInfo{}, err
-	}
-	defer resp.Body.Close()
-	if copyErr := <-copyDone; copyErr != nil {
-		return FileInfo{}, copyErr
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return FileInfo{}, dataPlaneHTTPError("Files.Write", resp.StatusCode)
-	}
-	var infos []writeInfo
-	if err := json.NewDecoder(resp.Body).Decode(&infos); err != nil {
-		return FileInfo{}, err
-	}
-	if len(infos) == 0 {
-		return FileInfo{}, codeError(Protocol, "Files.Write", "WRITE_INFO_MISSING")
-	}
-	return mapWriteInfo(infos[0]), nil
+	return mapWriteInfo(info), nil
 }
-func (d *legacyDataPlane) List(ctx context.Context, path string, depth int, user string) (result []FileInfo, err error) {
+func (d *runtimeDataPlane) List(ctx context.Context, path string, depth int, user string) (result []FileInfo, err error) {
 	ctx, finish, _ := d.requestOperation(ctx, "Files.List")
 	defer finish()
 	defer func() { err = operationError(ctx, "Files.List", err) }()
-	response, err := d.files.ListDir(ctx, dataPlaneRequest(&fsproto.ListDirRequest{Path: path, Depth: uint32(depth)}, d.config.AccessToken, dataPlaneUser(user)))
+	response, err := d.wire.Filesystem().ListDir(ctx, dataplane.Request(d.wire, &fsproto.ListDirRequest{Path: path, Depth: uint32(depth)}, user))
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +74,7 @@ func (d *legacyDataPlane) List(ctx context.Context, path string, depth int, user
 	}
 	return out, nil
 }
-func (d *legacyDataPlane) Run(ctx context.Context, command string, opts CommandOptions) (result CommandResult, err error) {
+func (d *runtimeDataPlane) Run(ctx context.Context, command string, opts CommandOptions) (result CommandResult, err error) {
 	ctx, finish, started := d.requestOperation(ctx, "Commands.Run")
 	defer finish()
 	defer func() { err = operationError(ctx, "Commands.Run", err) }()
@@ -155,7 +87,7 @@ func (d *legacyDataPlane) Run(ctx context.Context, command string, opts CommandO
 		limit = DefaultMaxOutputBytes
 	}
 	stdout, stderr := &limitedOutput{limit: limit}, &limitedOutput{limit: limit}
-	stream, err := d.process.Start(ctx, dataPlaneRequest(&processproto.StartRequest{Process: cfg}, d.config.AccessToken, dataPlaneUser(string(opts.User))))
+	stream, err := d.wire.Process().Start(ctx, dataplane.Request(d.wire, &processproto.StartRequest{Process: cfg}, string(opts.User)))
 	if err != nil {
 		return CommandResult{}, err
 	}
@@ -187,7 +119,7 @@ func (d *legacyDataPlane) Run(ctx context.Context, command string, opts CommandO
 	if ctx.Err() != nil && context.Cause(d.lifetime) == nil {
 		killCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		_, _ = d.process.SendSignal(killCtx, dataPlaneRequest(&processproto.SendSignalRequest{Process: &processproto.ProcessSelector{Selector: &processproto.ProcessSelector_Pid{Pid: pid}}, Signal: processproto.Signal_SIGNAL_SIGKILL}, d.config.AccessToken, dataPlaneUser(string(opts.User))))
+		_, _ = d.wire.Process().SendSignal(killCtx, dataplane.Request(d.wire, &processproto.SendSignalRequest{Process: &processproto.ProcessSelector{Selector: &processproto.ProcessSelector_Pid{Pid: pid}}, Signal: processproto.Signal_SIGNAL_SIGKILL}, string(opts.User)))
 		code := DeadlineExceeded
 		if ctx.Err() == context.Canceled {
 			code = Canceled
@@ -232,23 +164,7 @@ func (w *limitedOutput) bytes() []byte {
 	defer w.mu.Unlock()
 	return append([]byte(nil), w.value.Bytes()...)
 }
-func dataPlaneUser(v string) string {
-	if v == "" || v == string(User) {
-		return "user"
-	}
-	if v == string(Root) {
-		return "root"
-	}
-	return v
-}
-
-type writeInfo struct {
-	Name string  `json:"name"`
-	Type *string `json:"type"`
-	Path string  `json:"path"`
-}
-
-func mapWriteInfo(v writeInfo) FileInfo {
+func mapWriteInfo(v dataplane.WriteInfo) FileInfo {
 	out := FileInfo{Name: v.Name, Path: v.Path}
 	if v.Type != nil {
 		if *v.Type == "dir" {
@@ -280,9 +196,15 @@ func mapProtoFileInfo(v *fsproto.EntryInfo) FileInfo {
 	}
 	return out
 }
-func (d *legacyDataPlane) setHeaders(req *http.Request, user string) {
-	req.Header.Set("X-Access-Token", d.config.AccessToken)
-	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(user+":")))
+func mapDataPlaneError(operation string, err error) error {
+	if errors.Is(err, dataplane.ErrWriteInfoMissing) {
+		return codeError(Protocol, operation, "WRITE_INFO_MISSING")
+	}
+	var status *dataplane.HTTPError
+	if errors.As(err, &status) {
+		return dataPlaneHTTPError(operation, status.StatusCode)
+	}
+	return err
 }
 func dataPlaneHTTPError(operation string, status int) error {
 	code, retryable := Unavailable, true
@@ -302,14 +224,14 @@ func dataPlaneHTTPError(operation string, status int) error {
 	}
 	return &Error{Code: code, Operation: operation, Reason: fmt.Sprintf("HTTP_%d", status), Retryable: retryable}
 }
-func (d *legacyDataPlane) Ready(ctx context.Context) error {
+func (d *runtimeDataPlane) Ready(ctx context.Context) error {
 	if _, err := d.List(ctx, "/tmp", 1, "user"); err == nil {
 		return nil
 	}
 	_, err := d.List(ctx, "/tmp", 1, "root")
 	return err
 }
-func (d *legacyDataPlane) register(handle interface{ invalidate() error }) error {
+func (d *runtimeDataPlane) register(handle interface{ invalidate() error }) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.closed {
@@ -318,7 +240,7 @@ func (d *legacyDataPlane) register(handle interface{ invalidate() error }) error
 	d.handles = append(d.handles, handle)
 	return nil
 }
-func (d *legacyDataPlane) Close() error {
+func (d *runtimeDataPlane) Close() error {
 	d.mu.Lock()
 	if d.closed {
 		d.mu.Unlock()

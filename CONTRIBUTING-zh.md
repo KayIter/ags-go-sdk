@@ -45,6 +45,22 @@ make verify
 
 默认测试不得访问腾讯云。
 
+## 包边界
+
+面向用户的 API 保持内聚，协议实现放在私有边界内：
+
+- 根 `ags` 包定义 `Client`、`Sandbox`、能力入口、选项、结果和稳定错误。新增一个功能本身
+  不是增加公共 package 的理由。
+- 公共 `sandbox` 包只提供基于环境变量的快捷函数和类型别名，并始终返回根包定义的
+  `*ags.Sandbox`。
+- `internal/cloudapi` 负责 Cloud Action 路由及 Cloud 生成模型适配。
+- `internal/dataplane` 负责不可变的运行时 Endpoint、实例访问材料、鉴权 Header 和底层
+  HTTP/Connect Client。
+- `internal/gen` 保存 Filesystem 和 Process 生成代码；根包适配器将其转换为 SDK 自有模型。
+
+不要仅为了缩短文件，就把 Files、Commands、Code、PTY 或 Metrics 拆成多个公共 package。
+应在保持 `Client -> Sandbox` 用户模型不变的前提下，把私有实现拆入 `internal/`。
+
 ## 协议修改
 
 协议文件来自已记录来源。修改前完成以下操作：
@@ -55,7 +71,7 @@ make verify
 4. 运行 `make generate` 并审查生成代码 diff。
 5. 运行 `make verify-generate` 和 `make verify`。
 
-不要手工修改 `pb/` 下的生成文件。
+不要手工修改 `internal/gen/` 下的生成文件。
 
 ## 可选真实云测试
 

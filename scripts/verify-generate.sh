@@ -21,4 +21,4 @@ cp -R "$repo_root/proto" "$temp_root/proto"
   cd "$temp_root/proto"
   PATH="$("$go_cmd" env GOPATH)/bin:$PATH" buf generate
 )
-diff -ru "$repo_root/pb" "$temp_root/pb"
+diff -ru "$repo_root/internal/gen" "$temp_root/internal/gen"

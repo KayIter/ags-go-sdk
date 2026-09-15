@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	fsproto "github.com/TencentCloudAgentRuntime/ags-go-sdk/pb/filesystem"
-	fsconnect "github.com/TencentCloudAgentRuntime/ags-go-sdk/pb/filesystem/filesystemconnect"
-	processproto "github.com/TencentCloudAgentRuntime/ags-go-sdk/pb/process"
-	processconnect "github.com/TencentCloudAgentRuntime/ags-go-sdk/pb/process/processconnect"
+	fsproto "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/filesystem"
+	fsconnect "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/filesystem/filesystemconnect"
+	processproto "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/process"
+	processconnect "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/process/processconnect"
 )
 
 type filesystemFixture struct{ fsconnect.FilesystemHandler }
@@ -109,7 +109,7 @@ func endResponse(code int32) *processproto.StartResponse {
 	return &processproto.StartResponse{Event: &processproto.ProcessEvent{Event: &processproto.ProcessEvent_End{End: &processproto.ProcessEvent_EndEvent{ExitCode: code, Exited: true, Status: "exited"}}}}
 }
 
-func fixtureServer(t *testing.T, files http.Handler, process *processFixture) (*httptest.Server, *legacyDataPlane) {
+func fixtureServer(t *testing.T, files http.Handler, process *processFixture) (*httptest.Server, *runtimeDataPlane) {
 	t.Helper()
 	mux := http.NewServeMux()
 	fsPath, fsHandler := fsconnect.NewFilesystemHandler(filesystemFixture{})

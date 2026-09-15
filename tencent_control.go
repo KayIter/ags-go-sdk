@@ -230,4 +230,4 @@ func mapCloudError(err error, operation string) error {
 	return &Error{Code: code, Operation: operation, Reason: reason, RequestID: requestID, Retryable: retryable, Cause: err}
 }
 
-// legacyDataPlane stays below the public facade and never exposes token, host, or proto values.
+// runtimeDataPlane stays below the public facade and never exposes token, host, or proto values.

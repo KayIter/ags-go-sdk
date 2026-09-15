@@ -49,6 +49,24 @@ make verify
 
 Default tests must not contact Tencent Cloud.
 
+## Package boundaries
+
+Keep the user-facing API cohesive and the wire implementation private:
+
+- The root `ags` package owns `Client`, `Sandbox`, service facades, options, results, and stable
+  errors. Adding a feature does not by itself justify another public package.
+- The public `sandbox` package contains only environment-backed convenience functions and aliases;
+  it must return the canonical root `*ags.Sandbox`.
+- `internal/cloudapi` owns Cloud request routing and generated Cloud-model adaptation.
+- `internal/dataplane` owns immutable runtime endpoints, instance access material, authentication
+  headers, and low-level HTTP/Connect clients.
+- `internal/gen` contains generated filesystem and process bindings. Root adapters translate their
+  messages into SDK-owned public models.
+
+Do not move Files, Commands, Code, PTY, or Metrics into separate public packages merely to reduce
+file size. Split private implementation behind `internal/` boundaries while preserving the simple
+`Client -> Sandbox` user model.
+
 ## Protocol changes
 
 Protocol definitions are copied source with recorded provenance. Before editing them:
@@ -59,7 +77,7 @@ Protocol definitions are copied source with recorded provenance. Before editing 
 4. Run `make generate` and review the generated diff.
 5. Run `make verify-generate` and `make verify`.
 
-Never edit files under `pb/` by hand.
+Never edit files under `internal/gen/` by hand.
 
 ## Optional real Cloud tests
 
