@@ -49,6 +49,7 @@ func main() {
 	}
 	failures = append(failures, exportedDocFailures(".")...)
 	failures = append(failures, privateWireBoundaryFailures(".")...)
+	failures = append(failures, architectureBoundaryFailures(".")...)
 	if len(failures) > 0 {
 		for _, failure := range failures {
 			fmt.Fprintln(os.Stderr, failure)
@@ -56,6 +57,78 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println("repository documentation and path checks passed")
+}
+
+func architectureBoundaryFailures(root string) []string {
+	allowedRoot := map[string]bool{
+		"client.go": true, "cloud.go": true, "code.go": true,
+		"commands.go": true, "credentials.go": true, "doc.go": true,
+		"errors.go": true, "files.go": true, "metrics.go": true,
+		"sandbox.go": true, "sandbox_update.go": true, "types.go": true,
+	}
+	forbiddenRootPatterns := []*regexp.Regexp{
+		regexp.MustCompile(`^runtime_.*\.go$`),
+		regexp.MustCompile(`^tencent_.*\.go$`),
+		regexp.MustCompile(`.*_transport\.go$`),
+		regexp.MustCompile(`^lifecycle\.go$`),
+	}
+	const module = "github.com/TencentCloudAgentRuntime/ags-go-sdk"
+	var failures []string
+	rootFiles := 0
+	fset := token.NewFileSet()
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if entry.IsDir() {
+			if rel == ".git" || rel == "internal/gen" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(rel, ".go") || strings.HasSuffix(rel, "_test.go") {
+			return nil
+		}
+		rootFile := !strings.Contains(rel, "/")
+		if rootFile {
+			rootFiles++
+			name := filepath.Base(rel)
+			if !allowedRoot[name] {
+				failures = append(failures, fmt.Sprintf("%s is not an approved public-root production file", rel))
+			}
+			for _, pattern := range forbiddenRootPatterns {
+				if pattern.MatchString(name) {
+					failures = append(failures, fmt.Sprintf("%s uses a forbidden private-implementation filename in the public root", rel))
+				}
+			}
+		}
+		file, parseErr := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
+		if parseErr != nil {
+			return parseErr
+		}
+		for _, imported := range file.Imports {
+			value := strings.Trim(imported.Path.Value, `"`)
+			if rootFile && (strings.HasPrefix(value, "github.com/tencentcloud/tencentcloud-sdk-go/") || value == "connectrpc.com/connect" || strings.Contains(value, module+"/internal/gen/")) {
+				failures = append(failures, fmt.Sprintf("%s imports concrete Cloud or wire package %s from the public root", rel, value))
+			}
+			if strings.HasPrefix(rel, "internal/") && value == module {
+				failures = append(failures, fmt.Sprintf("%s imports the public root package from internal implementation", rel))
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		failures = append(failures, err.Error())
+	}
+	if rootFiles > len(allowedRoot) {
+		failures = append(failures, fmt.Sprintf("public root has %d production Go files; maximum is %d", rootFiles, len(allowedRoot)))
+	}
+	return failures
 }
 
 func privateWireBoundaryFailures(root string) []string {

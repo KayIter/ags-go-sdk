@@ -3,8 +3,101 @@ package ags
 import (
 	"context"
 	"errors"
+	"io"
 	"strings"
+
+	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/model"
+	internalruntime "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/runtime"
 )
+
+func (d *runtimeDataPlane) Read(ctx context.Context, path, user string) (io.ReadCloser, error) {
+	reader, err := d.inner.Read(ctx, path, user)
+	if err != nil {
+		return nil, normalizeError("Files.Read", err)
+	}
+	return &facadeReader{ReadCloser: reader}, nil
+}
+
+type facadeReader struct{ io.ReadCloser }
+
+func (r *facadeReader) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	return n, normalizeError("Files.Read", err)
+}
+func (r *facadeReader) Close() error { return normalizeError("Files.Read", r.ReadCloser.Close()) }
+
+func (d *runtimeDataPlane) Write(ctx context.Context, path string, body io.Reader, user string) (FileInfo, error) {
+	value, err := d.inner.Write(ctx, path, body, user)
+	return mapRuntimeFileInfo(value), normalizeError("Files.Write", err)
+}
+
+func (d *runtimeDataPlane) List(ctx context.Context, path string, depth int, user string) ([]FileInfo, error) {
+	values, err := d.inner.List(ctx, path, depth, user)
+	if err != nil {
+		return nil, normalizeError("Files.List", err)
+	}
+	out := make([]FileInfo, 0, len(values))
+	for _, value := range values {
+		out = append(out, mapRuntimeFileInfo(value))
+	}
+	return out, nil
+}
+
+func (d *runtimeDataPlane) Stat(ctx context.Context, path, user string) (FileInfo, error) {
+	value, err := d.inner.Stat(ctx, path, user)
+	return mapRuntimeFileInfo(value), normalizeError("Files.Stat", err)
+}
+func (d *runtimeDataPlane) MakeDir(ctx context.Context, path, user string) (FileInfo, error) {
+	value, err := d.inner.MakeDir(ctx, path, user)
+	return mapRuntimeFileInfo(value), normalizeError("Files.MakeDir", err)
+}
+func (d *runtimeDataPlane) Move(ctx context.Context, source, destination, user string) (FileInfo, error) {
+	value, err := d.inner.Move(ctx, source, destination, user)
+	return mapRuntimeFileInfo(value), normalizeError("Files.Move", err)
+}
+func (d *runtimeDataPlane) Remove(ctx context.Context, path, user string) error {
+	return normalizeError("Files.Remove", d.inner.Remove(ctx, path, user))
+}
+func (d *runtimeDataPlane) Watch(ctx context.Context, root string, opts WatchOptions) (*WatchHandle, error) {
+	handle, err := internalruntime.StartWatch(d.inner, ctx, root, model.WatchOptions{User: string(opts.User), Recursive: opts.Recursive, IncludeEntry: opts.IncludeEntry, Buffer: opts.Buffer}, internalruntime.WatchMapper[FileEvent]{Event: mapWatchEvent, Error: func(err error) error { return normalizeError("Files.Watch", err) }})
+	if err != nil {
+		return nil, normalizeError("Files.Watch", err)
+	}
+	return &WatchHandle{inner: handle}, nil
+}
+
+func mapRuntimeFileInfo(value model.FileInfo) FileInfo {
+	kind := UnknownFileType
+	switch value.Type {
+	case model.FileRegular:
+		kind = File
+	case model.FileDirectory:
+		kind = Directory
+	}
+	return FileInfo{Name: value.Name, Path: value.Path, Type: kind, Size: value.Size, Mode: value.Mode, Permissions: value.Permissions, Owner: value.Owner, Group: value.Group, ModifiedAt: value.ModifiedAt, SymlinkTarget: value.SymlinkTarget}
+}
+
+func mapWatchEvent(value model.FileEvent) FileEvent {
+	kind := FileEventType("UNKNOWN")
+	switch value.Kind {
+	case model.FileEventCreate:
+		kind = FileCreate
+	case model.FileEventWrite:
+		kind = FileWrite
+	case model.FileEventRemove:
+		kind = FileRemove
+	case model.FileEventRename:
+		kind = FileRename
+	case model.FileEventChmod:
+		kind = FileChmod
+	}
+	out := FileEvent{WatchID: value.WatchID, Sequence: value.Sequence, Type: kind, Path: value.Path, OldPath: value.OldPath}
+	if value.Entry != nil {
+		entry := mapRuntimeFileInfo(*value.Entry)
+		out.Entry = &entry
+	}
+	return out
+}
 
 // StatOptions selects the remote identity for a metadata query.
 type StatOptions struct {

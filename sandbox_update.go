@@ -5,8 +5,6 @@ import (
 	"errors"
 	"strings"
 	"time"
-
-	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/controlplane"
 )
 
 // UpdateOptions changes lifetime and upserts metadata. Empty fields are omitted.
@@ -137,25 +135,4 @@ func (s *Sandbox) Update(ctx context.Context, opts UpdateOptions) (UpdateResult,
 		return UpdateResult{}, err
 	}
 	return UpdateResult{InstanceID: s.id}, nil
-}
-
-func (c *tencentControlPlane) Update(ctx context.Context, id string, opts UpdateOptions) error {
-	in := controlplane.UpdateInput{InstanceID: id}
-	if opts.Timeout != nil {
-		in.Timeout = opts.Timeout.String()
-	}
-	if len(opts.MetadataUpsert) > 0 {
-		metadata, err := c.api.MetadataForUpdate(ctx, id)
-		if err != nil {
-			return updateFailure(id, MutationNotSent, MutationReadMetadata, mapCloudError(err, "DescribeSandboxInstanceList"))
-		}
-		for k, v := range opts.MetadataUpsert {
-			metadata[k] = v
-		}
-		in.Metadata = metadata
-	}
-	if err := ctx.Err(); err != nil {
-		return updateFailure(id, MutationNotSent, MutationSubmit, err)
-	}
-	return updateFailure(id, MutationUnknown, MutationSubmit, mapCloudError(c.api.Update(ctx, in), "UpdateSandboxInstance"))
 }

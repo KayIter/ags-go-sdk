@@ -6,8 +6,46 @@ import (
 	"io"
 	"time"
 
+	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/model"
 	internalruntime "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/runtime"
 )
+
+// runtimeDataPlane is a thin public-model adapter. Generation state, request
+// lifetime, stream pumps, and bounded queues are owned by internal/runtime.
+type runtimeDataPlane struct{ inner *internalruntime.Generation }
+
+func newRuntimeDataPlane(generation *internalruntime.Generation) *runtimeDataPlane {
+	return &runtimeDataPlane{inner: generation}
+}
+func (d *runtimeDataPlane) generation() *internalruntime.Generation { return d.inner }
+func (d *runtimeDataPlane) Ready(ctx context.Context) error {
+	return normalizeError("dataPlane.Ready", d.inner.Ready(ctx))
+}
+func (d *runtimeDataPlane) Close() error { return normalizeError("dataPlane.Close", d.inner.Close()) }
+
+func (d *runtimeDataPlane) OpenPTY(ctx context.Context, opts PTYOptions) (*PTYSession, error) {
+	handle, err := internalruntime.OpenPTY(d.inner, ctx, model.PTYConfig{ProcessConfig: model.ProcessConfig{Command: opts.Command, Args: append([]string(nil), opts.Args...), Env: cloneStringMap(opts.Env), CWD: opts.Cwd, User: string(opts.User)}, Cols: opts.Cols, Rows: opts.Rows}, internalruntime.PTYMapper[PTYEvent, ExitStatus]{Event: mapPTYEvent, Exit: mapExitStatus, Error: func(err error) error { return normalizeError("PTY", err) }})
+	if err != nil {
+		return nil, normalizeError("PTY.Open", err)
+	}
+	return &PTYSession{inner: handle}, nil
+}
+
+func mapPTYEvent(value model.PTYEvent) PTYEvent {
+	kind := PTYStart
+	switch value.Kind {
+	case model.PTYOutput:
+		kind = PTYOutput
+	case model.PTYEnd:
+		kind = PTYEnd
+	}
+	out := PTYEvent{Type: kind, Data: append([]byte(nil), value.Data...)}
+	if value.Exit != nil {
+		exit := mapExitStatus(*value.Exit)
+		out.Exit = &exit
+	}
+	return out
+}
 
 // Sandbox is the only P0 instance object. Its services are facades over one connection manager.
 type Sandbox struct {

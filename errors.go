@@ -8,7 +8,7 @@ import (
 	"io"
 	"net"
 
-	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/dataplane"
+	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/controlplane"
 	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/model"
 )
 
@@ -98,7 +98,7 @@ func normalizeError(operation string, err error) error {
 		if operation == "" {
 			operation = internal.Operation
 		}
-		return &Error{Code: ErrorCode(internal.Code), Operation: operation, Reason: internal.Reason, Cause: internal.Cause, Retryable: internal.Retryable}
+		return &Error{Code: ErrorCode(internal.Code), Operation: operation, Reason: internal.Reason, RequestID: internal.RequestID, Cause: internal.Cause, Retryable: internal.Retryable}
 	}
 	var sdk *Error
 	if errors.As(err, &sdk) {
@@ -111,67 +111,19 @@ func normalizeError(operation string, err error) error {
 	case errors.Is(err, context.DeadlineExceeded):
 		code = DeadlineExceeded
 	default:
-		var wire *dataplane.WireError
 		var timeout net.Error
 		var syntax *json.SyntaxError
 		var shape *json.UnmarshalTypeError
-		if errors.As(err, &wire) {
-			code = wireErrorCode(wire)
-		} else if errors.As(err, &timeout) && timeout.Timeout() {
+		if errors.As(err, &timeout) && timeout.Timeout() {
 			code = DeadlineExceeded
 		} else if errors.As(err, &syntax) || errors.As(err, &shape) || errors.Is(err, io.ErrUnexpectedEOF) {
 			code = Protocol
 		}
 	}
 	reason, retryable, cause := "REQUEST_FAILED", code == Unavailable || code == ResourceExhausted, err
-	var wire *dataplane.WireError
-	if errors.As(err, &wire) {
-		if wire.Reason != "" {
-			reason = wire.Reason
-		}
-		retryable = wire.Retryable
-		if wire.Detail != "" {
-			cause = errors.New(wire.Detail)
-		}
-	}
 	return &Error{Code: code, Operation: operation, Reason: reason, Cause: cause, Retryable: retryable}
 }
 
-func wireErrorCode(err *dataplane.WireError) ErrorCode {
-	if err.Kind == dataplane.ErrorProtocol {
-		return Protocol
-	}
-	if err.Kind == dataplane.ErrorHTTP {
-		switch err.StatusCode {
-		case 400:
-			return InvalidArgument
-		case 401:
-			return Unauthenticated
-		case 403:
-			return PermissionDenied
-		case 404:
-			return NotFound
-		case 409:
-			return Conflict
-		case 429:
-			return ResourceExhausted
-		default:
-			return Unavailable
-		}
-	}
-	code := ErrorCode(err.Code)
-	switch code {
-	case "UNKNOWN", "INTERNAL":
-		return Internal
-	case "DATA_LOSS", "UNIMPLEMENTED":
-		return Protocol
-	case "ALREADY_EXISTS", "ABORTED", "FAILED_PRECONDITION":
-		return Conflict
-	case "OUT_OF_RANGE":
-		return InvalidArgument
-	case "":
-		return Unavailable
-	default:
-		return code
-	}
+func mapCloudError(err error, operation string) error {
+	return normalizeError(operation, controlplane.NormalizeCloudError(err, operation))
 }

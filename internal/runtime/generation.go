@@ -31,9 +31,12 @@ func NewGeneration(wire *dataplane.Client, timeout time.Duration) *Generation {
 }
 
 func (g *Generation) operation(ctx context.Context) (context.Context, func()) {
-	child, cancel := context.WithCancelCause(ctx)
-	stop := context.AfterFunc(g.lifetime, func() { cancel(context.Cause(g.lifetime)) })
-	if cause := context.Cause(g.lifetime); cause != nil {
+	// Make the generation the direct parent so Close synchronously invalidates
+	// every delivered handle before returning. The caller context is the
+	// secondary cancellation source and never outlives the generation.
+	child, cancel := context.WithCancelCause(g.lifetime)
+	stop := context.AfterFunc(ctx, func() { cancel(context.Cause(ctx)) })
+	if cause := context.Cause(ctx); cause != nil {
 		cancel(cause)
 	}
 	return child, func() { stop(); cancel(context.Canceled) }

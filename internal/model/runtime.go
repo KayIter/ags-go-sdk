@@ -10,9 +10,9 @@ import (
 
 // Error is a redacted internal failure translated by the public facade.
 type Error struct {
-	Code, Operation, Reason string
-	Cause                   error
-	Retryable               bool
+	Code, Operation, Reason, RequestID string
+	Cause                              error
+	Retryable                          bool
 }
 
 func (e *Error) Error() string {

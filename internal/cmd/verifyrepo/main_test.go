@@ -69,6 +69,50 @@ var _ = wire.New("https://49983-instance.region.tencentags.com", "token", nil)
 	}
 }
 
+func TestArchitectureBoundaryRejectsUnapprovedAndForbiddenRootFiles(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "runtime_stream.go", "package ags\n")
+	failures := architectureBoundaryFailures(root)
+	if !containsFailure(failures, "not an approved public-root") || !containsFailure(failures, "forbidden private-implementation filename") {
+		t.Fatalf("failures = %v", failures)
+	}
+}
+
+func TestArchitectureBoundaryRejectsRootCloudSDKImport(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "client.go", `package ags
+import _ "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ags/v20250920"
+`)
+	failures := architectureBoundaryFailures(root)
+	if !containsFailure(failures, "imports concrete Cloud or wire package") {
+		t.Fatalf("failures = %v", failures)
+	}
+}
+
+func TestArchitectureBoundaryRejectsInternalReverseImport(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "internal/runtime/sandbox.go", `package runtime
+import _ "github.com/TencentCloudAgentRuntime/ags-go-sdk"
+`)
+	failures := architectureBoundaryFailures(root)
+	if !containsFailure(failures, "imports the public root package") {
+		t.Fatalf("failures = %v", failures)
+	}
+}
+
+func TestArchitectureBoundaryAcceptsApprovedFacadeAndInternalDirection(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "client.go", `package ags
+import _ "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/controlplane"
+`)
+	writeFixture(t, root, "internal/runtime/sandbox.go", `package runtime
+import _ "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/model"
+`)
+	if failures := architectureBoundaryFailures(root); len(failures) != 0 {
+		t.Fatalf("failures = %v", failures)
+	}
+}
+
 func writeFixture(t *testing.T, root, name, contents string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(name))

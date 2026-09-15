@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/dataplane"
+	internalruntime "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/runtime"
 )
 
 func newDataPlane(base, token string, client *http.Client) *runtimeDataPlane {
@@ -12,5 +13,5 @@ func newDataPlane(base, token string, client *http.Client) *runtimeDataPlane {
 }
 
 func newDataPlaneWithTimeout(base, token string, client *http.Client, timeout time.Duration) *runtimeDataPlane {
-	return newRuntimeDataPlane(dataplane.New(base, token, client), timeout)
+	return newRuntimeDataPlane(internalruntime.NewGeneration(dataplane.New(base, token, client), timeout))
 }

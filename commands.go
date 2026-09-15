@@ -68,6 +68,42 @@ type commandConnector interface {
 	ListCommands(context.Context, SandboxUser) ([]ProcessInfo, error)
 }
 
+func (d *runtimeDataPlane) Run(ctx context.Context, command string, opts CommandOptions) (CommandResult, error) {
+	value, err := d.inner.Run(ctx, model.ProcessConfig{Command: command, Args: opts.Args, Env: opts.Env, CWD: opts.Cwd, User: string(opts.User), MaxOutputBytes: opts.MaxOutputBytes})
+	if err != nil {
+		return CommandResult{}, normalizeError("Commands.Run", err)
+	}
+	return commandMapper().Result(value), nil
+}
+
+func (d *runtimeDataPlane) Start(ctx context.Context, command string, opts StartOptions) (*CommandHandle, error) {
+	handle, err := internalruntime.StartCommand(d.inner, ctx, model.ProcessConfig{Command: command, Args: opts.Args, Env: opts.Env, CWD: opts.Cwd, User: string(opts.User), MaxOutputBytes: opts.MaxOutputBytes}, commandMapper())
+	if err != nil {
+		return nil, normalizeError("Commands.Start", err)
+	}
+	return &CommandHandle{inner: handle}, nil
+}
+
+func (d *runtimeDataPlane) ConnectCommand(ctx context.Context, pid uint32, opts ConnectCommandOptions) (*CommandHandle, error) {
+	handle, err := internalruntime.ConnectCommand(d.inner, ctx, pid, string(opts.User), opts.MaxOutputBytes, commandMapper())
+	if err != nil {
+		return nil, normalizeError("Commands.Connect", err)
+	}
+	return &CommandHandle{inner: handle}, nil
+}
+
+func (d *runtimeDataPlane) ListCommands(ctx context.Context, user SandboxUser) ([]ProcessInfo, error) {
+	values, err := d.inner.ListCommands(ctx, string(user))
+	if err != nil {
+		return nil, normalizeError("Commands.List", err)
+	}
+	out := make([]ProcessInfo, 0, len(values))
+	for _, value := range values {
+		out = append(out, ProcessInfo{PID: value.PID, Tag: value.Tag, Cmd: value.Command, Args: append([]string(nil), value.Args...), Env: cloneStringMap(value.Env), CWD: value.CWD})
+	}
+	return out, nil
+}
+
 // ConnectCommandOptions configures observation and control of an existing runtime process.
 type ConnectCommandOptions struct {
 	// User selects the runtime account used for subsequent input and signals.
