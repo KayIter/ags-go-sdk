@@ -88,9 +88,13 @@ func TestReviewDataPlaneStableErrors(t *testing.T) {
 	}
 }
 
-type reviewBurstProcess struct{ pc.ProcessHandler }
+type reviewBurstProcess struct {
+	pc.ProcessHandler
+	burstDone chan struct{}
+}
 
-func (reviewBurstProcess) Start(_ context.Context, _ *connect.Request[pp.StartRequest], stream *connect.ServerStream[pp.StartResponse]) error {
+func (p reviewBurstProcess) Start(_ context.Context, _ *connect.Request[pp.StartRequest], stream *connect.ServerStream[pp.StartResponse]) error {
+	defer close(p.burstDone)
 	if err := stream.Send(startResponse(42)); err != nil {
 		return err
 	}
@@ -105,7 +109,8 @@ func (reviewBurstProcess) SendSignal(context.Context, *connect.Request[pp.SendSi
 	return connect.NewResponse(&pp.SendSignalResponse{}), nil
 }
 func TestReviewPtyWaitWithoutEventConsumer(t *testing.T) {
-	path, handler := pc.NewProcessHandler(reviewBurstProcess{})
+	burstDone := make(chan struct{})
+	path, handler := pc.NewProcessHandler(reviewBurstProcess{burstDone: burstDone})
 	mux := http.NewServeMux()
 	mux.Handle(path, handler)
 	server := httptest.NewServer(mux)
@@ -116,6 +121,11 @@ func TestReviewPtyWaitWithoutEventConsumer(t *testing.T) {
 	pty, err := s.PTY().Open(ctx, PTYOptions{Command: "sh", Cols: 80, Rows: 24})
 	if err != nil {
 		t.Fatal(err)
+	}
+	select {
+	case <-burstDone:
+	case <-ctx.Done():
+		t.Fatal("PTY fixture did not finish sending its output burst")
 	}
 	wait, end := context.WithTimeout(ctx, 100*time.Millisecond)
 	defer end()
