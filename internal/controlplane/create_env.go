@@ -1,4 +1,4 @@
-package cloudapi
+package controlplane
 
 import (
 	ags "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ags/v20250920"

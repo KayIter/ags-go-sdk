@@ -1,9 +1,9 @@
-// Package cloudapi isolates Tencent Cloud's generated SDK from AGS's public API.
+// Package controlplane isolates Tencent Cloud's generated SDK from AGS's public API.
 //
 // It owns TC3 signing, wire models, endpoints, and Cloud API error extraction.
 // The parent ags package owns product semantics and maps these neutral values to
 // the stable Native SDK surface.
-package cloudapi
+package controlplane
 
 import (
 	"bytes"

@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/cloudapi"
+	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/controlplane"
 )
 
 func TestCloudPollingCancellation(t *testing.T) {
@@ -49,7 +49,7 @@ func TestCloudStateContract(t *testing.T) {
 	}
 	for _, test := range fixture.Cases {
 		t.Run(test.Wire, func(t *testing.T) {
-			got := instanceFrom(cloudapi.Instance{ID: "synthetic", Status: test.Wire})
+			got := instanceFrom(controlplane.Instance{ID: "synthetic", Status: test.Wire})
 			if string(got.State) != test.State || (got.State == Failed) != test.TerminalFailure {
 				t.Fatalf("state %s = %s; terminal=%v", test.Wire, got.State, got.State == Failed)
 			}

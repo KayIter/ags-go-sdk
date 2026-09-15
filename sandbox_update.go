@@ -4,10 +4,9 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/cloudapi"
+	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/controlplane"
 )
 
 // UpdateOptions changes lifetime and upserts metadata. Empty fields are omitted.
@@ -67,30 +66,6 @@ type updateControl interface {
 
 // lifecycleMutex preserves existing local serialization while allowing Update
 // to abandon a lock wait without leaving an orphaned lock-acquisition goroutine.
-type lifecycleMutex struct {
-	once  sync.Once
-	token chan struct{}
-}
-
-func (m *lifecycleMutex) acquire(ctx context.Context) error {
-	m.once.Do(func() { m.token = make(chan struct{}, 1); m.token <- struct{}{} })
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-m.token:
-		if err := ctx.Err(); err != nil {
-			m.Unlock()
-			return err
-		}
-		return nil
-	}
-}
-func (m *lifecycleMutex) Lock()   { _ = m.acquire(context.Background()) }
-func (m *lifecycleMutex) Unlock() { m.token <- struct{}{} }
-
 func updateFailure(id string, state MutationState, phase MutationPhase, err error) error {
 	if err == nil {
 		return nil
@@ -148,10 +123,10 @@ func (s *Sandbox) Update(ctx context.Context, opts UpdateOptions) (UpdateResult,
 	if !ok {
 		return fail(codeError(Unsupported, "Sandbox.Update", "UPDATE_UNAVAILABLE"))
 	}
-	if err = s.lifecycle.acquire(ctx); err != nil {
+	if err = s.owner.Lock(ctx); err != nil {
 		return fail(err)
 	}
-	defer s.lifecycle.Unlock()
+	defer s.owner.Unlock()
 	if s.isClosed() {
 		return fail(codeError(Conflict, "Sandbox.Update", "SANDBOX_CLOSED"))
 	}
@@ -165,7 +140,7 @@ func (s *Sandbox) Update(ctx context.Context, opts UpdateOptions) (UpdateResult,
 }
 
 func (c *tencentControlPlane) Update(ctx context.Context, id string, opts UpdateOptions) error {
-	in := cloudapi.UpdateInput{InstanceID: id}
+	in := controlplane.UpdateInput{InstanceID: id}
 	if opts.Timeout != nil {
 		in.Timeout = opts.Timeout.String()
 	}

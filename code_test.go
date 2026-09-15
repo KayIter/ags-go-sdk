@@ -138,11 +138,7 @@ func TestCodeContextOwnerGenerationAndBusyRejectBeforeHTTP(t *testing.T) {
 	}
 
 	newGeneration := newDataPlane(server.URL, "new-synthetic-instance-token", server.Client())
-	sandbox.mu.Lock()
-	oldGeneration := sandbox.plane
-	sandbox.plane = newGeneration
-	sandbox.mu.Unlock()
-	_ = oldGeneration.Close()
+	_ = sandbox.owner.Replace(newGeneration.generation())
 	_, err = sandbox.Code().Run(ctx, "3", RunCodeOptions{Context: managed}, CodeCallbacks{})
 	assertCodeReason(t, err, "CODE_CONTEXT_INVALIDATED")
 	if executeCalls.Load() != 1 {

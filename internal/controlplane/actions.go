@@ -1,4 +1,4 @@
-package cloudapi
+package controlplane
 
 // ActionRoute is the compile-time transport choice for an approved public Cloud action.
 type ActionRoute string

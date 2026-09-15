@@ -388,21 +388,10 @@ type dataPlane interface {
 	Read(context.Context, string, string) (io.ReadCloser, error)
 	Write(context.Context, string, io.Reader, string) (FileInfo, error)
 	List(context.Context, string, int, string) ([]FileInfo, error)
-	Watch(context.Context, string, WatchOptions) (watchStream, error)
+	Watch(context.Context, string, WatchOptions) (*WatchHandle, error)
 	Run(context.Context, string, CommandOptions) (CommandResult, error)
-	OpenPTY(context.Context, PTYOptions) (ptyStream, error)
+	OpenPTY(context.Context, PTYOptions) (*PTYSession, error)
 	Ready(context.Context) error
-	Close() error
-}
-type watchStream interface {
-	Recv() (FileEvent, error)
-	Close() error
-}
-type ptyStream interface {
-	Recv() (PTYEvent, error)
-	ID() string
-	Input(context.Context, []byte) error
-	Resize(context.Context, uint32, uint32) error
 	Close() error
 }
 type controlPlane interface {

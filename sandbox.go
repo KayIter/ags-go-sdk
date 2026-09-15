@@ -4,27 +4,29 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"sync"
 	"time"
+
+	internalruntime "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/runtime"
 )
 
 // Sandbox is the only P0 instance object. Its services are facades over one connection manager.
 type Sandbox struct {
-	id        string
-	client    *Client
-	mu        sync.Mutex
-	lifecycle lifecycleMutex
-	plane     dataPlane
-	closed    bool
-	files     *Files
-	commands  *Commands
-	pty       *PTY
-	code      *Code
-	metrics   *Metrics
+	id       string
+	client   *Client
+	owner    *internalruntime.Owner
+	files    *Files
+	commands *Commands
+	pty      *PTY
+	code     *Code
+	metrics  *Metrics
 }
 
 func newSandbox(client *Client, id string, plane dataPlane) *Sandbox {
-	s := &Sandbox{id: id, client: client, plane: plane}
+	var generation *internalruntime.Generation
+	if adapter, ok := plane.(*runtimeDataPlane); ok && adapter != nil {
+		generation = adapter.generation()
+	}
+	s := &Sandbox{id: id, client: client, owner: internalruntime.NewOwner(generation)}
 	s.files = &Files{s}
 	s.commands = &Commands{s}
 	s.pty = &PTY{s}
@@ -96,8 +98,10 @@ func (s *Sandbox) WaitFor(ctx context.Context, target SandboxState) (SandboxInfo
 // Old handles remain invalid even if the pause fails; use the current generation or reconnect.
 // Cancellation does not establish the remote outcome.
 func (s *Sandbox) Pause(ctx context.Context, opts PauseOptions) (SandboxInfo, error) {
-	s.lifecycle.Lock()
-	defer s.lifecycle.Unlock()
+	if err := s.owner.Lock(context.Background()); err != nil {
+		return SandboxInfo{}, normalizeError("Sandbox.Pause", err)
+	}
+	defer s.owner.Unlock()
 	if s.isClosed() {
 		return SandboxInfo{}, codeError(Conflict, "Sandbox.Pause", "SANDBOX_CLOSED")
 	}
@@ -112,9 +116,9 @@ func (s *Sandbox) Pause(ctx context.Context, opts PauseOptions) (SandboxInfo, er
 	if err != nil {
 		if plane, reconnectErr := s.client.cfg.control.dataPlane(ctx, s.id); reconnectErr == nil {
 			if readyErr := plane.Ready(ctx); readyErr == nil {
-				s.mu.Lock()
-				s.plane = plane
-				s.mu.Unlock()
+				if adapter, ok := plane.(*runtimeDataPlane); ok {
+					_ = s.owner.Replace(adapter.generation())
+				}
 			} else {
 				_ = plane.Close()
 			}
@@ -131,8 +135,10 @@ func (s *Sandbox) Resume(ctx context.Context, opts ResumeOptions) (SandboxInfo, 
 	if err != nil {
 		return SandboxInfo{}, err
 	}
-	s.lifecycle.Lock()
-	defer s.lifecycle.Unlock()
+	if err := s.owner.Lock(context.Background()); err != nil {
+		return SandboxInfo{}, normalizeError("Sandbox.Resume", err)
+	}
+	defer s.owner.Unlock()
 	if s.isClosed() {
 		return SandboxInfo{}, codeError(Conflict, "Sandbox.Resume", "SANDBOX_CLOSED")
 	}
@@ -151,12 +157,13 @@ func (s *Sandbox) resume(ctx context.Context, opts ResumeOptions) (SandboxInfo, 
 		_ = plane.Close()
 		return SandboxInfo{}, err
 	}
-	s.mu.Lock()
-	old := s.plane
-	s.plane = plane
-	s.mu.Unlock()
-	if old != nil {
-		_ = old.Close()
+	adapter, ok := plane.(*runtimeDataPlane)
+	if !ok {
+		_ = plane.Close()
+		return SandboxInfo{}, codeError(Internal, "Sandbox.Resume", "RUNTIME_GENERATION_MISSING")
+	}
+	if err := s.owner.Replace(adapter.generation()); err != nil {
+		return SandboxInfo{}, normalizeError("Sandbox.Resume", err)
 	}
 	return info, nil
 }
@@ -165,50 +172,36 @@ func (s *Sandbox) resume(ctx context.Context, opts ResumeOptions) (SandboxInfo, 
 // Cloud instance first if needed. It is not an ownership check; only delete resources the
 // caller is authorized to remove.
 func (s *Sandbox) Delete(ctx context.Context) error {
-	s.lifecycle.Lock()
-	defer s.lifecycle.Unlock()
+	if err := s.owner.Lock(context.Background()); err != nil {
+		return normalizeError("Sandbox.Delete", err)
+	}
+	defer s.owner.Unlock()
 	_ = s.invalidate()
 	return s.client.Sandboxes().Delete(ctx, s.id)
 }
 func (s *Sandbox) invalidate() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.plane == nil {
-		return nil
-	}
-	err := s.plane.Close()
-	s.plane = nil
-	return err
+	return normalizeError("Sandbox.invalidate", s.owner.Invalidate())
 }
 func (s *Sandbox) dataPlane(op string) (dataPlane, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
-		return nil, codeError(Conflict, op, "SANDBOX_CLOSED")
+	generation, err := s.owner.Generation(op)
+	if err != nil {
+		return nil, normalizeError(op, err)
 	}
-	if s.plane == nil {
-		return nil, codeError(InstancePaused, op, "INSTANCE_PAUSED")
-	}
-	return s.plane, nil
+	return &runtimeDataPlane{inner: generation}, nil
 }
 
 // Close releases this handle's local data-plane resources. It is idempotent and
 // never deletes the remote sandbox or closes a shared HTTP client. Info, Metrics
 // and explicit Delete remain available; Connect creates a new usable handle.
 func (s *Sandbox) Close() error {
-	s.lifecycle.Lock()
-	defer s.lifecycle.Unlock()
-	s.mu.Lock()
-	s.closed = true
-	s.mu.Unlock()
-	return s.invalidate()
+	if err := s.owner.Lock(context.Background()); err != nil {
+		return normalizeError("Sandbox.Close", err)
+	}
+	defer s.owner.Unlock()
+	return normalizeError("Sandbox.Close", s.owner.Close())
 }
 
-func (s *Sandbox) isClosed() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.closed
-}
+func (s *Sandbox) isClosed() bool { return s.owner.IsClosed() }
 
 // Files operates on the current data-plane generation; filesystem enforcement belongs to the
 // runtime.
@@ -286,72 +279,28 @@ func (f *Files) Watch(ctx context.Context, path string, opts WatchOptions) (*Wat
 	if e != nil {
 		return nil, e
 	}
-	stream, e := p.Watch(ctx, path, opts)
-	if e != nil {
-		return nil, e
-	}
-	h := &WatchHandle{stream: stream, events: make(chan FileEvent, watchBuffer(opts.Buffer))}
-	go h.pump()
-	return h, nil
+	return p.Watch(ctx, path, opts)
 }
 
 // WatchHandle owns one bounded local notification stream. Close it when finished; it cannot
 // survive generation replacement.
 type WatchHandle struct {
-	stream watchStream
-	once   sync.Once
-	events chan FileEvent
-	mu     sync.Mutex
-	err    error
+	inner *internalruntime.WatchHandle[FileEvent]
 }
 
 // DefaultWatchBuffer is the pending-event capacity when WatchOptions.Buffer is zero.
 const DefaultWatchBuffer = 32
 
-func watchBuffer(v int) int {
-	if v == 0 {
-		return DefaultWatchBuffer
-	}
-	return v
-}
-func (h *WatchHandle) pump() {
-	defer close(h.events)
-	for {
-		event, err := h.stream.Recv()
-		if err != nil {
-			if err != io.EOF {
-				h.mu.Lock()
-				h.err = normalizeError("Files.Watch", err)
-				h.mu.Unlock()
-			}
-			return
-		}
-		select {
-		case h.events <- event:
-		default:
-			h.mu.Lock()
-			h.err = codeError(ResourceExhausted, "Files.Watch", "WATCH_BUFFER_FULL")
-			h.mu.Unlock()
-			_ = h.stream.Close()
-			return
-		}
-	}
-}
-
 // Events returns the watch's channel; use one consumer and drain until closed before
 // inspecting Err.
-func (h *WatchHandle) Events() <-chan FileEvent { return h.events }
+func (h *WatchHandle) Events() <-chan FileEvent { return h.inner.Events() }
 
 // Err returns the last observed stream error, including overflow. Nil before channel closure
 // does not prove successful completion.
-func (h *WatchHandle) Err() error { h.mu.Lock(); defer h.mu.Unlock(); return h.err }
+func (h *WatchHandle) Err() error { return h.inner.Err() }
 
 // Close idempotently ends local observation without deleting files or the remote sandbox.
-func (h *WatchHandle) Close() error {
-	var err error
-	h.once.Do(func() { err = h.stream.Close() })
-	return err
-}
+func (h *WatchHandle) Close() error { return h.inner.Close() }
 
 // Commands executes runtime processes without automatic replay of command side effects.
 type Commands struct{ sandbox *Sandbox }
@@ -393,13 +342,7 @@ func (p *PTY) Open(ctx context.Context, opts PTYOptions) (*PTYSession, error) {
 	if e != nil {
 		return nil, e
 	}
-	stream, e := d.OpenPTY(ctx, opts)
-	if e != nil {
-		return nil, e
-	}
-	s := &PTYSession{stream: stream, id: stream.ID(), events: make(chan PTYEvent, 32), done: make(chan struct{})}
-	go s.pump()
-	return s, nil
+	return d.OpenPTY(ctx, opts)
 }
 
 func validateUser(user SandboxUser, operation string) error {
@@ -412,57 +355,15 @@ func validateUser(user SandboxUser, operation string) error {
 // PTYSession owns one terminal stream. Drain Events concurrently with Wait because output
 // always enters the bounded event channel.
 type PTYSession struct {
-	stream ptyStream
-	once   sync.Once
-	id     string
-	events chan PTYEvent
-	done   chan struct{}
-	mu     sync.Mutex
-	exit   ExitStatus
-	err    error
-}
-
-func (s *PTYSession) pump() {
-	defer close(s.events)
-	defer close(s.done)
-	for {
-		event, err := s.stream.Recv()
-		if err != nil {
-			if err != io.EOF {
-				s.mu.Lock()
-				s.err = normalizeError("PTY.Events", err)
-				s.mu.Unlock()
-			} else {
-				s.mu.Lock()
-				s.err = codeError(Protocol, "PTY.Events", "END_EVENT_MISSING")
-				s.mu.Unlock()
-			}
-			return
-		}
-		select {
-		case s.events <- event:
-		default:
-			s.mu.Lock()
-			s.err = codeError(ResourceExhausted, "PTY.Events", "PTY_BUFFER_FULL")
-			s.mu.Unlock()
-			_ = s.stream.Close()
-			return
-		}
-		if event.Type == PTYEnd && event.Exit != nil {
-			s.mu.Lock()
-			s.exit = *event.Exit
-			s.mu.Unlock()
-			return
-		}
-	}
+	inner *internalruntime.PTYSession[PTYEvent, ExitStatus]
 }
 
 // ID returns a stable SDK-local handle identity, not a server reconnect token.
-func (s *PTYSession) ID() string { return s.id }
+func (s *PTYSession) ID() string { return s.inner.ID() }
 
 // Events returns the bounded 32-event terminal channel. Consume continuously even while
 // waiting; overflow fails with ResourceExhausted.
-func (s *PTYSession) Events() <-chan PTYEvent { return s.events }
+func (s *PTYSession) Events() <-chan PTYEvent { return s.inner.Events() }
 
 // Write sends nonempty terminal input once. Do not mutate data during the call; cancellation
 // cannot undo accepted input.
@@ -470,7 +371,7 @@ func (s *PTYSession) Write(ctx context.Context, data []byte) error {
 	if len(data) == 0 {
 		return codeError(InvalidArgument, "PTY.Write", "DATA_REQUIRED")
 	}
-	return s.stream.Input(ctx, data)
+	return s.inner.Write(ctx, append([]byte(nil), data...))
 }
 
 // Resize requests positive terminal dimensions in character cells without replay.
@@ -478,28 +379,15 @@ func (s *PTYSession) Resize(ctx context.Context, cols, rows uint32) error {
 	if cols < 1 || rows < 1 {
 		return codeError(InvalidArgument, "PTY.Resize", "SIZE_REQUIRED")
 	}
-	return s.stream.Resize(ctx, cols, rows)
+	return s.inner.Resize(ctx, cols, rows)
 }
 
 // Wait observes terminal status until ctx expires; it does not signal the process. Drain
 // Events concurrently, since unconsumed output can fail the observation.
-func (s *PTYSession) Wait(ctx context.Context) (ExitStatus, error) {
-	select {
-	case <-ctx.Done():
-		return ExitStatus{}, normalizeError("PTY.Wait", ctx.Err())
-	case <-s.done:
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		return s.exit, s.err
-	}
-}
+func (s *PTYSession) Wait(ctx context.Context) (ExitStatus, error) { return s.inner.Wait(ctx) }
 
 // Close idempotently sends TERM to a still-live process with a three-second signal-request
 // budget, then closes local resources. It does not wait for proof of exit or send KILL.
 // Generation invalidation instead closes locally without signaling; neither path deletes the
 // sandbox.
-func (s *PTYSession) Close() error {
-	var err error
-	s.once.Do(func() { err = s.stream.Close() })
-	return err
-}
+func (s *PTYSession) Close() error { return s.inner.Close() }

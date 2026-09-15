@@ -1,188 +1,174 @@
 package ags
 
 import (
-	"bytes"
 	"context"
 	"io"
-	"sync"
 	"time"
 
 	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/dataplane"
+	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/model"
+	internalruntime "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/runtime"
 )
 
-type runtimeDataPlane struct {
-	wire     *dataplane.Client
-	timeout  time.Duration
-	mu       sync.Mutex
-	handles  []interface{ invalidate() error }
-	closed   bool
-	lifetime context.Context
-	cancel   context.CancelCauseFunc
-}
+// runtimeDataPlane is a temporary facade adapter. It owns no lifecycle state;
+// all state and streams belong to the internal Generation.
+type runtimeDataPlane struct{ inner *internalruntime.Generation }
 
 func newRuntimeDataPlane(wire *dataplane.Client, timeout time.Duration) *runtimeDataPlane {
-	lifetime, cancel := context.WithCancelCause(context.Background())
-	return &runtimeDataPlane{wire: wire, timeout: timeout, lifetime: lifetime, cancel: cancel}
+	return &runtimeDataPlane{inner: internalruntime.NewGeneration(wire, timeout)}
 }
-func (d *runtimeDataPlane) Read(ctx context.Context, path, user string) (out io.ReadCloser, err error) {
-	ctx, finish, started := d.requestOperation(ctx, "Files.Read")
-	defer func() {
-		err = operationError(ctx, "Files.Read", err)
-		if out == nil {
-			finish()
-		}
-	}()
-	body, err := d.wire.ReadFile(ctx, path, user)
-	if err != nil {
-		return nil, mapDataPlaneError("Files.Read", err)
-	}
-	started()
-	return &generationReader{ReadCloser: body, ctx: ctx, finish: finish, op: "Files.Read"}, nil
+
+func (d *runtimeDataPlane) generation() *internalruntime.Generation { return d.inner }
+func (d *runtimeDataPlane) Ready(ctx context.Context) error {
+	return normalizeError("dataPlane.Ready", d.inner.Ready(ctx))
 }
-func (d *runtimeDataPlane) Write(ctx context.Context, path string, body io.Reader, user string) (out FileInfo, err error) {
-	ctx, finish, _ := d.requestOperation(ctx, "Files.Write")
-	defer finish()
-	defer func() { err = operationError(ctx, "Files.Write", err) }()
-	info, err := d.wire.WriteFile(ctx, path, body, user)
+func (d *runtimeDataPlane) Close() error { return normalizeError("dataPlane.Close", d.inner.Close()) }
+func (d *runtimeDataPlane) Read(ctx context.Context, path, user string) (io.ReadCloser, error) {
+	reader, err := d.inner.Read(ctx, path, user)
 	if err != nil {
-		return FileInfo{}, mapDataPlaneError("Files.Write", err)
+		return nil, normalizeError("Files.Read", err)
 	}
-	return mapDataPlaneFileInfo(info), nil
+	return &facadeReader{ReadCloser: reader}, nil
 }
-func (d *runtimeDataPlane) List(ctx context.Context, path string, depth int, user string) (result []FileInfo, err error) {
-	ctx, finish, _ := d.requestOperation(ctx, "Files.List")
-	defer finish()
-	defer func() { err = operationError(ctx, "Files.List", err) }()
-	entries, err := d.wire.ListFiles(ctx, path, depth, user)
+
+type facadeReader struct{ io.ReadCloser }
+
+func (r *facadeReader) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	return n, normalizeError("Files.Read", err)
+}
+func (r *facadeReader) Close() error { return normalizeError("Files.Read", r.ReadCloser.Close()) }
+
+func (d *runtimeDataPlane) Write(ctx context.Context, path string, body io.Reader, user string) (FileInfo, error) {
+	value, err := d.inner.Write(ctx, path, body, user)
+	return mapRuntimeFileInfo(value), normalizeError("Files.Write", err)
+}
+
+func (d *runtimeDataPlane) List(ctx context.Context, path string, depth int, user string) ([]FileInfo, error) {
+	values, err := d.inner.List(ctx, path, depth, user)
 	if err != nil {
-		return nil, err
+		return nil, normalizeError("Files.List", err)
 	}
-	out := make([]FileInfo, 0, len(entries))
-	for _, entry := range entries {
-		out = append(out, mapDataPlaneFileInfo(entry))
+	out := make([]FileInfo, 0, len(values))
+	for _, value := range values {
+		out = append(out, mapRuntimeFileInfo(value))
 	}
 	return out, nil
 }
-func (d *runtimeDataPlane) Run(ctx context.Context, command string, opts CommandOptions) (result CommandResult, err error) {
-	ctx, finish, started := d.requestOperation(ctx, "Commands.Run")
-	defer finish()
-	defer func() { err = operationError(ctx, "Commands.Run", err) }()
-	cfg := dataplane.ProcessConfig{Command: command, Args: opts.Args, Env: opts.Env, CWD: opts.Cwd}
-	limit := opts.MaxOutputBytes
-	if limit == 0 {
-		limit = DefaultMaxOutputBytes
-	}
-	stdout, stderr := &limitedOutput{limit: limit}, &limitedOutput{limit: limit}
-	stream, err := d.wire.StartProcess(ctx, cfg, string(opts.User))
+
+func (d *runtimeDataPlane) Stat(ctx context.Context, path, user string) (FileInfo, error) {
+	value, err := d.inner.Stat(ctx, path, user)
+	return mapRuntimeFileInfo(value), normalizeError("Files.Stat", err)
+}
+func (d *runtimeDataPlane) MakeDir(ctx context.Context, path, user string) (FileInfo, error) {
+	value, err := d.inner.MakeDir(ctx, path, user)
+	return mapRuntimeFileInfo(value), normalizeError("Files.MakeDir", err)
+}
+func (d *runtimeDataPlane) Move(ctx context.Context, source, destination, user string) (FileInfo, error) {
+	value, err := d.inner.Move(ctx, source, destination, user)
+	return mapRuntimeFileInfo(value), normalizeError("Files.Move", err)
+}
+func (d *runtimeDataPlane) Remove(ctx context.Context, path, user string) error {
+	return normalizeError("Files.Remove", d.inner.Remove(ctx, path, user))
+}
+
+func (d *runtimeDataPlane) Run(ctx context.Context, command string, opts CommandOptions) (CommandResult, error) {
+	value, err := d.inner.Run(ctx, model.ProcessConfig{Command: command, Args: opts.Args, Env: opts.Env, CWD: opts.Cwd, User: string(opts.User), MaxOutputBytes: opts.MaxOutputBytes})
 	if err != nil {
-		return CommandResult{}, err
+		return CommandResult{}, normalizeError("Commands.Run", err)
 	}
-	defer stream.Close()
-	started()
-	for {
-		event, receiveErr := stream.Recv()
-		if receiveErr != nil {
-			if receiveErr == io.EOF {
-				break
-			}
-			return CommandResult{}, receiveErr
-		}
-		switch event.Kind {
-		case dataplane.ProcessStdout:
-			stdout.write(event.Data)
-		case dataplane.ProcessStderr:
-			stderr.write(event.Data)
-		case dataplane.ProcessEnd:
-			return CommandResult{ExitCode: event.Exit.Code, Stdout: stdout.bytes(), Stderr: stderr.bytes(), StdoutTruncated: stdout.truncated, StderrTruncated: stderr.truncated}, nil
-		}
-	}
-	if ctx.Err() != nil && context.Cause(d.lifetime) == nil {
-		killCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		_ = d.wire.SendProcessSignal(killCtx, stream.PID, dataplane.SignalKILL, string(opts.User))
-		code := DeadlineExceeded
-		if ctx.Err() == context.Canceled {
-			code = Canceled
-		}
-		return CommandResult{}, &Error{Code: code, Operation: "Commands.Run", Cause: ctx.Err()}
-	}
-	return CommandResult{}, codeError(Protocol, "Commands.Run", "END_EVENT_MISSING")
+	return commandMapper().Result(value), nil
 }
 
-// DefaultMaxOutputBytes limits each retained command-output stream to 4 MiB when no explicit
-// limit is supplied.
-const DefaultMaxOutputBytes int64 = 4 << 20
-
-type limitedOutput struct {
-	mu        sync.Mutex
-	value     bytes.Buffer
-	limit     int64
-	truncated bool
+func (d *runtimeDataPlane) Start(ctx context.Context, command string, opts StartOptions) (*CommandHandle, error) {
+	handle, err := internalruntime.StartCommand(d.inner, ctx, model.ProcessConfig{Command: command, Args: opts.Args, Env: opts.Env, CWD: opts.Cwd, User: string(opts.User), MaxOutputBytes: opts.MaxOutputBytes}, commandMapper())
+	if err != nil {
+		return nil, normalizeError("Commands.Start", err)
+	}
+	return &CommandHandle{inner: handle}, nil
 }
 
-func (w *limitedOutput) write(value []byte) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	remaining := w.limit - int64(w.value.Len())
-	if remaining <= 0 {
-		if len(value) > 0 {
-			w.truncated = true
-		}
-		return
+func (d *runtimeDataPlane) ConnectCommand(ctx context.Context, pid uint32, opts ConnectCommandOptions) (*CommandHandle, error) {
+	handle, err := internalruntime.ConnectCommand(d.inner, ctx, pid, string(opts.User), opts.MaxOutputBytes, commandMapper())
+	if err != nil {
+		return nil, normalizeError("Commands.Connect", err)
 	}
-	if int64(len(value)) > remaining {
-		value = value[:remaining]
-		w.truncated = true
+	return &CommandHandle{inner: handle}, nil
+}
+
+func (d *runtimeDataPlane) ListCommands(ctx context.Context, user SandboxUser) ([]ProcessInfo, error) {
+	values, err := d.inner.ListCommands(ctx, string(user))
+	if err != nil {
+		return nil, normalizeError("Commands.List", err)
 	}
-	_, _ = w.value.Write(value)
+	out := make([]ProcessInfo, 0, len(values))
+	for _, value := range values {
+		out = append(out, ProcessInfo{PID: value.PID, Tag: value.Tag, Cmd: value.Command, Args: append([]string(nil), value.Args...), Env: cloneStringMap(value.Env), CWD: value.CWD})
+	}
+	return out, nil
 }
-func (w *limitedOutput) bytes() []byte {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return append([]byte(nil), w.value.Bytes()...)
+
+func (d *runtimeDataPlane) Watch(ctx context.Context, root string, opts WatchOptions) (*WatchHandle, error) {
+	handle, err := internalruntime.StartWatch(d.inner, ctx, root, model.WatchOptions{User: string(opts.User), Recursive: opts.Recursive, IncludeEntry: opts.IncludeEntry, Buffer: opts.Buffer}, internalruntime.WatchMapper[FileEvent]{Event: mapWatchEvent, Error: func(err error) error { return normalizeError("Files.Watch", err) }})
+	if err != nil {
+		return nil, normalizeError("Files.Watch", err)
+	}
+	return &WatchHandle{inner: handle}, nil
 }
-func mapDataPlaneFileInfo(v dataplane.FileInfo) FileInfo {
+
+func (d *runtimeDataPlane) OpenPTY(ctx context.Context, opts PTYOptions) (*PTYSession, error) {
+	handle, err := internalruntime.OpenPTY(d.inner, ctx, model.PTYConfig{ProcessConfig: model.ProcessConfig{Command: opts.Command, Args: append([]string(nil), opts.Args...), Env: cloneStringMap(opts.Env), CWD: opts.Cwd, User: string(opts.User)}, Cols: opts.Cols, Rows: opts.Rows}, internalruntime.PTYMapper[PTYEvent, ExitStatus]{Event: mapPTYEvent, Exit: mapExitStatus, Error: func(err error) error { return normalizeError("PTY", err) }})
+	if err != nil {
+		return nil, normalizeError("PTY.Open", err)
+	}
+	return &PTYSession{inner: handle}, nil
+}
+
+func mapRuntimeFileInfo(value model.FileInfo) FileInfo {
 	kind := UnknownFileType
-	switch v.Type {
-	case dataplane.FileTypeFile:
+	switch value.Type {
+	case model.FileRegular:
 		kind = File
-	case dataplane.FileTypeDirectory:
+	case model.FileDirectory:
 		kind = Directory
 	}
-	return FileInfo{Name: v.Name, Path: v.Path, Type: kind, Size: v.Size, Mode: v.Mode, Permissions: v.Permissions, Owner: v.Owner, Group: v.Group, ModifiedAt: v.ModifiedAt, SymlinkTarget: v.SymlinkTarget}
+	return FileInfo{Name: value.Name, Path: value.Path, Type: kind, Size: value.Size, Mode: value.Mode, Permissions: value.Permissions, Owner: value.Owner, Group: value.Group, ModifiedAt: value.ModifiedAt, SymlinkTarget: value.SymlinkTarget}
 }
-func mapDataPlaneError(operation string, err error) error {
-	return normalizeError(operation, err)
+
+func mapWatchEvent(value model.FileEvent) FileEvent {
+	kind := FileEventType("UNKNOWN")
+	switch value.Kind {
+	case model.FileEventCreate:
+		kind = FileCreate
+	case model.FileEventWrite:
+		kind = FileWrite
+	case model.FileEventRemove:
+		kind = FileRemove
+	case model.FileEventRename:
+		kind = FileRename
+	case model.FileEventChmod:
+		kind = FileChmod
+	}
+	out := FileEvent{WatchID: value.WatchID, Sequence: value.Sequence, Type: kind, Path: value.Path, OldPath: value.OldPath}
+	if value.Entry != nil {
+		entry := mapRuntimeFileInfo(*value.Entry)
+		out.Entry = &entry
+	}
+	return out
 }
-func (d *runtimeDataPlane) Ready(ctx context.Context) error {
-	if _, err := d.List(ctx, "/tmp", 1, "user"); err == nil {
-		return nil
+
+func mapPTYEvent(value model.PTYEvent) PTYEvent {
+	kind := PTYStart
+	switch value.Kind {
+	case model.PTYOutput:
+		kind = PTYOutput
+	case model.PTYEnd:
+		kind = PTYEnd
 	}
-	_, err := d.List(ctx, "/tmp", 1, "root")
-	return err
-}
-func (d *runtimeDataPlane) register(handle interface{ invalidate() error }) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.closed {
-		return codeError(InstancePaused, "dataPlane", "INSTANCE_PAUSED")
+	out := PTYEvent{Type: kind, Data: append([]byte(nil), value.Data...)}
+	if value.Exit != nil {
+		exit := mapExitStatus(*value.Exit)
+		out.Exit = &exit
 	}
-	d.handles = append(d.handles, handle)
-	return nil
-}
-func (d *runtimeDataPlane) Close() error {
-	d.mu.Lock()
-	if d.closed {
-		d.mu.Unlock()
-		return nil
-	}
-	d.closed = true
-	d.cancel(codeError(InstancePaused, "dataPlane", "INSTANCE_PAUSED"))
-	handles := append([]interface{ invalidate() error }{}, d.handles...)
-	d.handles = nil
-	d.mu.Unlock()
-	for _, handle := range handles {
-		_ = handle.invalidate()
-	}
-	return nil
+	return out
 }

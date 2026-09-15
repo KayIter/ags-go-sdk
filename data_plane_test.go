@@ -212,14 +212,8 @@ func TestGeneratedDataPlaneCommandWatchAndPTY(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := stream.Recv()
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := stream.Recv()
-	if err != nil {
-		t.Fatal(err)
-	}
+	first := <-stream.Events()
+	second := <-stream.Events()
 	if first.WatchID == "" || first.WatchID != second.WatchID || first.Sequence != 1 || second.Sequence != 2 || first.Entry == nil {
 		t.Fatalf("events=%+v %+v", first, second)
 	}
@@ -227,8 +221,8 @@ func TestGeneratedDataPlaneCommandWatchAndPTY(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if event, err := pty.Recv(); err != nil || event.Type != PTYStart || pty.ID() == "" {
-		t.Fatalf("start=%+v err=%v", event, err)
+	if event := <-pty.Events(); event.Type != PTYStart || pty.ID() == "" {
+		t.Fatalf("start=%+v", event)
 	}
 	if err := pty.Resize(context.Background(), 100, 40); err != nil {
 		t.Fatal(err)
@@ -236,11 +230,11 @@ func TestGeneratedDataPlaneCommandWatchAndPTY(t *testing.T) {
 	if got := <-process.resize; got != [2]uint32{100, 40} {
 		t.Fatalf("resize=%v", got)
 	}
-	if err := pty.Input(context.Background(), []byte("echo ok\n")); err != nil {
+	if err := pty.Write(context.Background(), []byte("echo ok\n")); err != nil {
 		t.Fatal(err)
 	}
-	output, _ := pty.Recv()
-	end, _ := pty.Recv()
+	output := <-pty.Events()
+	end := <-pty.Events()
 	if string(output.Data) != "echo ok\n" || end.Exit == nil || end.Exit.Code != 0 {
 		t.Fatalf("pty output=%+v end=%+v", output, end)
 	}

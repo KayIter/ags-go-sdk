@@ -7,19 +7,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/cloudapi"
+	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/controlplane"
 	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/dataplane"
 )
 
 // tencentControlPlane is the Native control-plane adapter. Generated request
-// models and TC3 signing stay behind internal/cloudapi.
+// models and TC3 signing stay behind internal/controlplane.
 type tencentControlPlane struct {
 	region     string
 	credential CredentialProvider
 	client     *http.Client
 	endpoint   string
 	timeout    time.Duration
-	api        *cloudapi.AGS
+	api        *controlplane.AGS
 	runtime    *dataplane.CloudConnector
 }
 
@@ -31,14 +31,14 @@ func newTencentControlPlane(region string, credential CredentialProvider, endpoi
 		client = &http.Client{Timeout: timeout}
 	}
 	c := &tencentControlPlane{region: region, credential: credential, client: client, endpoint: endpoint, timeout: timeout}
-	c.api = cloudapi.NewAGS(cloudapi.Config{Region: region, Endpoint: endpoint, Timeout: timeout, Transport: client.Transport}, c.cloudCredential)
+	c.api = controlplane.NewAGS(controlplane.Config{Region: region, Endpoint: endpoint, Timeout: timeout, Transport: client.Transport}, c.cloudCredential)
 	c.runtime = dataplane.NewCloudConnector(region, c.api, client)
 	return c
 }
 func (c *tencentControlPlane) Create(ctx context.Context, opts CreateOptions) (SandboxInfo, error) {
-	in := cloudapi.CreateInput{ToolID: opts.Tool.ID, ToolName: opts.Tool.Name, ClientToken: opts.ClientToken, Metadata: opts.Metadata, Env: opts.Env, AuthMode: string(opts.AuthMode)}
+	in := controlplane.CreateInput{ToolID: opts.Tool.ID, ToolName: opts.Tool.Name, ClientToken: opts.ClientToken, Metadata: opts.Metadata, Env: opts.Env, AuthMode: string(opts.AuthMode)}
 	for _, mount := range opts.MountOptions {
-		in.MountOptions = append(in.MountOptions, cloudapi.MountOption{Name: mount.Name, MountPath: mount.MountPath, SubPath: mount.SubPath, ReadOnly: mount.ReadOnly})
+		in.MountOptions = append(in.MountOptions, controlplane.MountOption{Name: mount.Name, MountPath: mount.MountPath, SubPath: mount.SubPath, ReadOnly: mount.ReadOnly})
 	}
 	if opts.Timeout != nil {
 		in.Timeout = opts.Timeout.String()
@@ -50,7 +50,7 @@ func (c *tencentControlPlane) Create(ctx context.Context, opts CreateOptions) (S
 	return instanceFrom(out), nil
 }
 func (c *tencentControlPlane) Get(ctx context.Context, id string) (SandboxInfo, error) {
-	out, err := c.api.List(ctx, cloudapi.ListInput{InstanceIDs: []string{id}, Limit: 1})
+	out, err := c.api.List(ctx, controlplane.ListInput{InstanceIDs: []string{id}, Limit: 1})
 	if err != nil {
 		return SandboxInfo{}, mapCloudError(err, "DescribeSandboxInstanceList")
 	}
@@ -142,7 +142,7 @@ func (c *tencentControlPlane) dataPlane(ctx context.Context, id string) (dataPla
 	if err != nil {
 		var protocol *dataplane.WireError
 		if errors.As(err, &protocol) {
-			return nil, mapDataPlaneError("AcquireSandboxInstanceToken", err)
+			return nil, normalizeError("AcquireSandboxInstanceToken", err)
 		}
 		return nil, mapCloudError(err, "AcquireSandboxInstanceToken")
 	}
@@ -169,7 +169,7 @@ func (c *tencentControlPlane) waitFor(ctx context.Context, id string, target San
 		}
 	}
 }
-func instanceFrom(value cloudapi.Instance) SandboxInfo {
+func instanceFrom(value controlplane.Instance) SandboxInfo {
 	state := SandboxState(value.Status)
 	switch state {
 	case "STARTING":
@@ -184,9 +184,9 @@ func instanceFrom(value cloudapi.Instance) SandboxInfo {
 }
 func parseTime(value string) time.Time { parsed, _ := time.Parse(time.RFC3339, value); return parsed }
 
-func (c *tencentControlPlane) cloudCredential(ctx context.Context) (cloudapi.Credential, error) {
+func (c *tencentControlPlane) cloudCredential(ctx context.Context) (controlplane.Credential, error) {
 	value, err := retrieveCloudCredential(ctx, c.credential)
-	return cloudapi.Credential{SecretID: value.SecretID, SecretKey: value.SecretKey, Token: value.Token}, err
+	return controlplane.Credential{SecretID: value.SecretID, SecretKey: value.SecretKey, Token: value.Token}, err
 }
 
 func mapCloudError(err error, operation string) error {
@@ -204,7 +204,7 @@ func mapCloudError(err error, operation string) error {
 		return &Error{Code: DeadlineExceeded, Operation: operation, Cause: err}
 	}
 	code, reason, retryable, requestID := Unavailable, "CLOUD_API_UNAVAILABLE", true, ""
-	var cloud *cloudapi.Error
+	var cloud *controlplane.Error
 	if errors.As(err, &cloud) {
 		requestID = cloud.RequestID
 		value := strings.ToLower(cloud.Code)

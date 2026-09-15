@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/cloudapi"
+	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/controlplane"
 )
 
 func readContract[T any](t *testing.T, path string) T {
@@ -31,15 +31,15 @@ func TestControlPlaneActionRegistryMatchesContract(t *testing.T) {
 			Route string `json:"route"`
 		} `json:"actions"`
 	}](t, "contracts/control-plane.json")
-	expected := map[string]cloudapi.ActionRoute{}
+	expected := map[string]controlplane.ActionRoute{}
 	for _, action := range contract.Actions {
 		if _, exists := expected[action.Name]; exists {
 			t.Fatalf("duplicate action %s", action.Name)
 		}
-		expected[action.Name] = cloudapi.ActionRoute(action.Route)
+		expected[action.Name] = controlplane.ActionRoute(action.Route)
 	}
-	if !reflect.DeepEqual(cloudapi.ActionRoutes(), expected) {
-		t.Fatalf("action routing drift: got=%v want=%v", cloudapi.ActionRoutes(), expected)
+	if !reflect.DeepEqual(controlplane.ActionRoutes(), expected) {
+		t.Fatalf("action routing drift: got=%v want=%v", controlplane.ActionRoutes(), expected)
 	}
 }
 

@@ -5,12 +5,12 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/cloudapi"
+	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/controlplane"
 )
 
 // tencentMonitor is a thin, signed adapter for the public Cloud Monitor API.
 type tencentMonitor struct {
-	api *cloudapi.Monitor
+	api *controlplane.Monitor
 }
 
 func newTencentMonitor(region string, credential CredentialProvider, client *http.Client) *tencentMonitor {
@@ -20,14 +20,14 @@ func newTencentMonitorWithConfig(region string, credential CredentialProvider, e
 	if client == nil {
 		client = &http.Client{Timeout: timeout}
 	}
-	source := func(ctx context.Context) (cloudapi.Credential, error) {
+	source := func(ctx context.Context) (controlplane.Credential, error) {
 		value, err := retrieveCloudCredential(ctx, credential)
-		return cloudapi.Credential{SecretID: value.SecretID, SecretKey: value.SecretKey, Token: value.Token}, err
+		return controlplane.Credential{SecretID: value.SecretID, SecretKey: value.SecretKey, Token: value.Token}, err
 	}
-	return &tencentMonitor{api: cloudapi.NewMonitor(cloudapi.Config{Region: region, Endpoint: endpoint, Timeout: timeout, Transport: client.Transport}, source)}
+	return &tencentMonitor{api: controlplane.NewMonitor(controlplane.Config{Region: region, Endpoint: endpoint, Timeout: timeout, Transport: client.Transport}, source)}
 }
 func (m *tencentMonitor) Query(ctx context.Context, q monitorRequest) (monitorResponse, error) {
-	response, err := m.api.Query(ctx, cloudapi.MonitorInput{Namespace: "QCE/AGS", MetricName: string(q.Metric), InstanceID: q.InstanceID, ToolID: q.ToolID, Period: q.Period, Start: q.Start, End: q.End})
+	response, err := m.api.Query(ctx, controlplane.MonitorInput{Namespace: "QCE/AGS", MetricName: string(q.Metric), InstanceID: q.InstanceID, ToolID: q.ToolID, Period: q.Period, Start: q.Start, End: q.End})
 	if err != nil {
 		return monitorResponse{}, mapCloudError(err, "Metrics.Get")
 	}

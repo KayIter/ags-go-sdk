@@ -1,6 +1,16 @@
 package ags
 
-import "fmt"
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+
+	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/dataplane"
+	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/model"
+)
 
 // ErrorCode is the stable public error category.
 type ErrorCode string
@@ -77,4 +87,91 @@ func (e *Error) Is(target error) bool {
 }
 func codeError(code ErrorCode, op, reason string) error {
 	return &Error{Code: code, Operation: op, Reason: reason, Retryable: code == Unavailable || code == ResourceExhausted || code == InstanceNotReady}
+}
+
+func normalizeError(operation string, err error) error {
+	if err == nil || err == io.EOF {
+		return err
+	}
+	var internal *model.Error
+	if errors.As(err, &internal) {
+		if operation == "" {
+			operation = internal.Operation
+		}
+		return &Error{Code: ErrorCode(internal.Code), Operation: operation, Reason: internal.Reason, Cause: internal.Cause, Retryable: internal.Retryable}
+	}
+	var sdk *Error
+	if errors.As(err, &sdk) {
+		return err
+	}
+	code := Unavailable
+	switch {
+	case errors.Is(err, context.Canceled):
+		code = Canceled
+	case errors.Is(err, context.DeadlineExceeded):
+		code = DeadlineExceeded
+	default:
+		var wire *dataplane.WireError
+		var timeout net.Error
+		var syntax *json.SyntaxError
+		var shape *json.UnmarshalTypeError
+		if errors.As(err, &wire) {
+			code = wireErrorCode(wire)
+		} else if errors.As(err, &timeout) && timeout.Timeout() {
+			code = DeadlineExceeded
+		} else if errors.As(err, &syntax) || errors.As(err, &shape) || errors.Is(err, io.ErrUnexpectedEOF) {
+			code = Protocol
+		}
+	}
+	reason, retryable, cause := "REQUEST_FAILED", code == Unavailable || code == ResourceExhausted, err
+	var wire *dataplane.WireError
+	if errors.As(err, &wire) {
+		if wire.Reason != "" {
+			reason = wire.Reason
+		}
+		retryable = wire.Retryable
+		if wire.Detail != "" {
+			cause = errors.New(wire.Detail)
+		}
+	}
+	return &Error{Code: code, Operation: operation, Reason: reason, Cause: cause, Retryable: retryable}
+}
+
+func wireErrorCode(err *dataplane.WireError) ErrorCode {
+	if err.Kind == dataplane.ErrorProtocol {
+		return Protocol
+	}
+	if err.Kind == dataplane.ErrorHTTP {
+		switch err.StatusCode {
+		case 400:
+			return InvalidArgument
+		case 401:
+			return Unauthenticated
+		case 403:
+			return PermissionDenied
+		case 404:
+			return NotFound
+		case 409:
+			return Conflict
+		case 429:
+			return ResourceExhausted
+		default:
+			return Unavailable
+		}
+	}
+	code := ErrorCode(err.Code)
+	switch code {
+	case "UNKNOWN", "INTERNAL":
+		return Internal
+	case "DATA_LOSS", "UNIMPLEMENTED":
+		return Protocol
+	case "ALREADY_EXISTS", "ABORTED", "FAILED_PRECONDITION":
+		return Conflict
+	case "OUT_OF_RANGE":
+		return InvalidArgument
+	case "":
+		return Unavailable
+	default:
+		return code
+	}
 }

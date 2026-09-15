@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/cloudapi"
+	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/controlplane"
 	"github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/dataplane"
 	fsproto "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/filesystem"
 	fsconnect "github.com/TencentCloudAgentRuntime/ags-go-sdk/internal/gen/filesystem/filesystemconnect"
@@ -140,7 +140,7 @@ func TestReviewPtyWaitWithoutEventConsumer(t *testing.T) {
 }
 
 func TestReviewCloudInvalidParameterIsNotRetryable(t *testing.T) {
-	err := mapCloudError(&cloudapi.Error{Code: "InvalidParameterValue.Timeout", RequestID: "fixture-request"}, "create")
+	err := mapCloudError(&controlplane.Error{Code: "InvalidParameterValue.Timeout", RequestID: "fixture-request"}, "create")
 	var sdk *Error
 	if !errors.As(err, &sdk) || sdk.Code != InvalidArgument || sdk.Retryable {
 		t.Fatalf("cloud HTTP-200 business rejection mapped incorrectly: %+v", sdk)

@@ -55,15 +55,13 @@ func TestPtyEndDoesNotCancelAcceptedInput(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pty.Close()
-	if _, err = pty.Recv(); err != nil {
-		t.Fatal(err)
-	}
+	<-pty.Events()
 	done := make(chan error, 1)
-	go func() { done <- pty.Input(ctx, []byte("exit 0\n")) }()
-	event, err := pty.Recv()
-	if err != nil || event.Type != PTYEnd {
+	go func() { done <- pty.Write(ctx, []byte("exit 0\n")) }()
+	event := <-pty.Events()
+	if event.Type != PTYEnd {
 		close(process.ack)
-		t.Fatalf("end: %v %v", event, err)
+		t.Fatalf("end: %v", event)
 	}
 	select {
 	case err := <-done:
@@ -95,14 +93,12 @@ func TestPtyEndStillAllowsExplicitCancellation(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer pty.Close()
-			if _, err = pty.Recv(); err != nil {
-				t.Fatal(err)
-			}
+			<-pty.Events()
 			done := make(chan error, 1)
-			go func() { done <- pty.Input(ctx, []byte("exit 0\n")) }()
-			event, err := pty.Recv()
-			if err != nil || event.Type != PTYEnd {
-				t.Fatalf("end: %v %v", event, err)
+			go func() { done <- pty.Write(ctx, []byte("exit 0\n")) }()
+			event := <-pty.Events()
+			if event.Type != PTYEnd {
+				t.Fatalf("end: %v", event)
 			}
 			switch mode {
 			case "close":
