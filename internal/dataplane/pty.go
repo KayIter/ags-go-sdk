@@ -20,7 +20,14 @@ type PTYConfig struct {
 
 // StartPTY waits for the process start barrier before returning the local stream.
 func (c *Client) StartPTY(ctx context.Context, config PTYConfig, user string) (*ProcessStream, error) {
-	return c.StartProcess(ctx, ProcessConfig{Command: config.Command, Args: config.Args, Env: config.Env, CWD: config.CWD, pty: &config.Size}, user)
+	requestConfig := ProcessConfig{Command: config.Command, Args: config.Args, Env: config.Env, CWD: config.CWD, pty: &config.Size}
+	stream, err := c.process.Start(ctx, request(c, &process.StartRequest{Process: processConfig(requestConfig), Pty: pty(requestConfig.pty)}, user))
+	if err != nil {
+		return nil, wrapWireError(err)
+	}
+	// PTY retains the runtime client's streaming behavior. The independent 2 MiB
+	// command-frame guard applies to retained command output, not terminal frames.
+	return startedProcess(startReceiver{stream: stream}, 0)
 }
 
 // SendPTYInput writes terminal bytes to the generation-bound PID.
